@@ -3,23 +3,23 @@
 # Global configuration values in PenGym
 #########################################
 
-pengym_source: home/cyuser/public/PenGym
+pengym_source: home/andrea/PenGym
 
 # Should be the same as path in CyRIS CONFIG
-cyber_range_dir: home/cyuser/public/cyris/cyber_range
+cyber_range_dir: home/andrea/cyuser/cyris/cyber_range
 
-host_mgmt_addr: 172.16.1.4
+host_mgmt_addr: 126.1.1.1
 host_virbr_addr: 192.168.122.1
-host_account: cyuser
-guest_basevm_config_file: /home/cyuser/images/ubuntubase.xml
+host_account: andrea
+guest_basevm_config_file: /home/andrea/cyuser/images/basevm/basevm.xml
 
-scenario_name: medium-multi-site
+scenario_name: tiny
 
-range_id: 44
+range_id: 126
 
 # Configuration of the MSF RPC service
 msfrpc_config:
-  msfrpc_client_pwd: my_password
+  msfrpc_client_pwd: your_password
   port: 55553
   ssl: True
 
@@ -34,6 +34,7 @@ service_port:
 additional_port:
   ftp: 6200 # VSFTP technique opens a backdoor on port 6200
   proftpd: 2121 # proftpd process runs on port 2121
+  tomcat: 8080
 
 # File path information
 file_path:
@@ -52,7 +53,7 @@ file_path:
   dst: /bin/cyberrange
 
   ## execute_program for cyber range creation
-  ## The path should be the path in database souces
+  ## The path should be the path in database souce
   
   # ftp 
   ftp_folder: /database/resources/ftp/vsftpd-2.3.4

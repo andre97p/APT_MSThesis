@@ -1,0 +1,99 @@
+- host_settings:
+  - id: host_1
+    mgmt_addr: localhost
+    virbr_addr: 192.168.122.1
+    account: andrea
+- guest_settings:
+  - id: host-1-0
+    basevm_host: host_1
+    basevm_config_file: /home/andrea/cyuser/images/basevm/basevm.xml
+    basevm_type: kvm
+    tasks:
+    - add_account:
+      - account: test
+        passwd: test1234
+    - copy_content:
+      - src: /home/andrea/PenGym/database
+        dst: /bin/cyberrange
+      - src: /home/andrea/PenGym/cyber_range
+        dst: /bin/cyberrange
+    - execute_program:
+      - program: /bin/cyberrange/database/resources/tomcat/install_tomcat.sh
+        interpreter: bash
+      - program: /bin/cyberrange/database/configuration_scripts/deactive_cron_service.sh
+        interpreter: bash
+        execute_time: after_clone
+      - program: /bin/cyberrange/database/configuration_scripts/execute_programs.sh
+        args: /bin/cyberrange/cyber_range/tiny/firewall/host-1-0_firewall.sh
+        interpreter: bash
+        execute_time: after_clone
+  - id: host-2-0
+    basevm_host: host_1
+    basevm_config_file: /home/andrea/cyuser/images/basevm/basevm.xml
+    basevm_type: kvm
+    tasks:
+    - add_account:
+      - account: test
+        passwd: test1234
+    - copy_content:
+      - src: /home/andrea/PenGym/database
+        dst: /bin/cyberrange
+      - src: /home/andrea/PenGym/cyber_range
+        dst: /bin/cyberrange
+    - execute_program:
+      - program: /bin/cyberrange/database/resources/tomcat/install_tomcat.sh
+        interpreter: bash
+      - program: /bin/cyberrange/database/configuration_scripts/deactive_cron_service.sh
+        interpreter: bash
+        execute_time: after_clone
+      - program: /bin/cyberrange/database/configuration_scripts/execute_programs.sh
+        args: /bin/cyberrange/cyber_range/tiny/firewall/host-2-0_firewall.sh
+        interpreter: bash
+        execute_time: after_clone
+  - id: host-3-0
+    basevm_host: host_1
+    basevm_config_file: /home/andrea/cyuser/images/basevm/basevm.xml
+    basevm_type: kvm
+    tasks:
+    - add_account:
+      - account: test
+        passwd: test1234
+    - copy_content:
+      - src: /home/andrea/PenGym/database
+        dst: /bin/cyberrange
+      - src: /home/andrea/PenGym/cyber_range
+        dst: /bin/cyberrange
+    - execute_program:
+      - program: /bin/cyberrange/database/resources/tomcat/install_tomcat.sh
+        interpreter: bash
+      - program: /bin/cyberrange/database/configuration_scripts/deactive_cron_service.sh
+        interpreter: bash
+        execute_time: after_clone
+      - program: /bin/cyberrange/database/configuration_scripts/execute_programs.sh
+        args: /bin/cyberrange/cyber_range/tiny/firewall/host-3-0_firewall.sh
+        interpreter: bash
+        execute_time: after_clone
+- clone_settings:
+  - range_id: 44
+    hosts:
+    - host_id: host_1
+      instance_number: 1
+      guests:
+      - guest_id: host-1-0
+        entry_point: true
+        number: 1
+      - guest_id: host-2-0
+        number: 1
+      - guest_id: host-3-0
+        number: 1
+      topology:
+      - type: custom
+        networks:
+        - name: link01
+          members: host-1-0.eth0
+        - name: link12
+          members: host-1-0.eth1, host-2-0.eth0
+        - name: link13
+          members: host-1-0.eth2, host-3-0.eth0
+        - name: link23
+          members: host-2-0.eth1, host-3-0.eth1

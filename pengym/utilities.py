@@ -575,7 +575,7 @@ def save_restore_firewall_rules_all_hosts (flag):
         flag (str): save or restore option
     """
 
-    script_path = 'pengym/envs/scripts/save_restore_firewall_rule.exp'
+    script_path = '/home/andrea/PenGym/pengym/envs/scripts/save_restore_firewall_rule.exp'
     
     hosts = list(scenario.hosts.keys())
 
@@ -604,7 +604,7 @@ def add_firewall_rules_all_hosts (subnet_id):
         subnet_id (int): subnet index
     """
 
-    script_path = 'pengym/envs/scripts/add_firewall_rule.exp'
+    script_path = '/home/andrea/PenGym/pengym/envs/scripts/add_firewall_rule.exp'
     
     hosts = list(scenario.hosts.keys())
 
@@ -624,7 +624,7 @@ def open_firewall_rule_e_samba(host):
     Args:
         host (tuple): Current host address
     """
-    script_path = 'pengym/envs/scripts/open_firewall_rule.exp'
+    script_path = '/home/andrea/PenGym/pengym/envs/scripts/open_firewall_rule.exp'
     
     vm_name = host_map[host][storyboard.KVM_DOMAIN]
     add_firewall_rules(script_path, vm_name, None)
@@ -637,7 +637,7 @@ def update_default_gw (target_host, bridge_ip):
         bridge_ip (str): ip address of bridge that is active
     """
 
-    script_path = 'pengym/envs/scripts/del_add_default_gw.exp'
+    script_path = '/home/andrea/PenGym/pengym/envs/scripts/del_add_default_gw.exp'
     vm_name = host_map[target_host][storyboard.KVM_DOMAIN]
     
     command = f'expect {script_path} {vm_name} {bridge_ip}'
@@ -682,6 +682,8 @@ def map_services_to_ports(services, subnet=False):
             port_list.append(port)
         else:
             if services[service] == True:
+                if service_port_map is None:
+                    raise ValueError("Critical Error: 'service_port_map' is None. The configuration file or tiny.yml failed to load the service-to-port mappings.")
                 port = service_port_map[service]
                 port_list.append(port)
     
