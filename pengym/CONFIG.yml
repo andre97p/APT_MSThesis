@@ -3,7 +3,7 @@
 # Global configuration values in PenGym
 #########################################
 
-pengym_source: home/andrea/PenGym
+pengym_source: home/andrea/APT_MSThesis
 
 # Should be the same as path in CyRIS CONFIG
 cyber_range_dir: home/andrea/cyuser/cyris/cyber_range
