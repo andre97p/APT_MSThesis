@@ -5,11 +5,12 @@
 
 import time
 import pengym
-import numpy
+import numpy as np
 import logging
 import sys
 import getopt
 import pengym.utilities as utils
+import pengym.training as training
 from pengym.storyboard import Storyboard
 
 storyboard = Storyboard()
@@ -36,49 +37,13 @@ ACTION_NAMES = {SUBNET_SCAN: "subnet_scan", OS_SCAN: "os_scan", SERVICE_SCAN: "s
                 EXPLOIT_SSH: "e_ssh",  EXPLOIT_FTP: "e_ftp", EXPLOIT_SAMBA: "e_samba", EXPLOIT_SMTP: "e_smtp", EXPLOIT_HTTP: "e_http", 
                 PRIVI_ESCA_TOMCAT: "pe_tomcat", PRIVI_ESCA_PROFTPD: "pe_daclsvc", PRIVI_ESCA_CRON: "pe_schtask"}
 
-HOST1_0 = 'host1-0'
-HOST1_1 = 'host1-1'
-HOST1_2 = 'host1-2'
-HOST1_3 = 'host1-3'
-HOST1_4 = 'host1-4'
-HOST1_5 = 'host1-5'
-HOST1_6 = 'host1-6'
-HOST1_7 = 'host1-7'
-HOST1_8 = 'host1-8'
-HOST1_9 = 'host1-9'
-HOST1_10 = 'host1-10'
-HOST1_11 = 'host1-11'
-HOST1_12 = 'host1-12'
-HOST1_13 = 'host1-13'
-HOST1_14 = 'host1-14'
-HOST1_15 = 'host1-15'
-HOST2_0 = 'host2-0'
-HOST2_1 = 'host2-1'
-HOST3_0 = 'host3-0'
-HOST3_1 = 'host3-1'
-HOST3_2 = 'host3-2'
-HOST3_3 = 'host3-3'
-HOST3_4 = 'host3-4'
-HOST3_5 = 'host3-5'
-HOST4_0 = 'host4-0'
-HOST4_1 = 'host4-1'
-HOST4_2 = 'host4-2'
-HOST4_3 = 'host4-3'
-HOST4_4 = 'host4-4'
-HOST5_0 = 'host5-0'
-HOST5_1 = 'host5-1'
-HOST5_2 = 'host5-2'
-HOST5_3 = 'host5-3'
-HOST6_0 = 'host6-0'
-HOST6_1 = 'host6-1'
+HOST1 = 'host1'
+HOST2 = 'host2'
+HOST3 = 'host3'
 
-ACTION_TARGETS = {HOST1_0: (1, 0), HOST1_1: (1, 1), HOST1_2: (1, 2), HOST1_3: (1, 3), HOST1_4: (1, 4), HOST1_5: (1, 5), HOST1_6: (1, 6), HOST1_7: (1, 7), 
-                  HOST1_8: (1, 8), HOST1_9: (1, 9), HOST1_10: (1, 10), HOST1_11: (1, 11), HOST1_12: (1, 12), HOST1_13: (1, 13), HOST1_14: (1, 14), HOST1_15: (1, 15),
-                  HOST2_0: (2, 0), HOST2_1: (2, 1), 
-                  HOST3_0: (3, 0), HOST3_1: (3, 1), HOST3_2: (3, 3), HOST3_3: (3, 3), HOST3_4: (3, 4), HOST3_5: (3, 5), 
-                  HOST4_0: (4, 0), HOST4_1: (4, 1),
-                  HOST5_0: (5, 0), HOST5_1: (5, 1),
-                  HOST6_0: (6, 0), HOST6_1: (6, 1)}
+
+
+ACTION_TARGETS = {HOST1: (1, 0), HOST2: (2, 0), HOST3: (3, 0)}
 
 # Agent types
 AGENT_TYPE_RANDOM = "random"
@@ -116,6 +81,7 @@ def run_random_agent(env):
 
         # Sample a random action from the action space of this environment
         action = env.action_space.sample()
+        action = action.item()
 
         # Increment step count and execute action
         step_count = step_count + 1
@@ -155,8 +121,7 @@ def run_deterministic_agent(env, deterministic_path):
         # Increment step count and execute action
         step_count = step_count + 1
         
-        print(f"- Step {step_count}: {action}")
-          
+        print(f"- Step {step_count}: {action}") 
         observation, reward, done, truncated, info = env.step(action)
 
         if RENDER_OBS_STATE:
@@ -178,17 +143,18 @@ def create_pengym_environment(scenario_name):
     # for the environment action space (used to determine order of random actions)
     seed = 1 # NORMAL: No e_ssh failure during pentesting path
     #seed = 300 # INCOMPLETE: Cause e_ssh failure during pentesting path
-    numpy.random.seed(seed)
+    np.random.seed(seed)
     env.action_space.seed(1)
 
     return env
+
 
 # Create PenGym environment using custom scenario
 def create_pengym_custom_environment(scenario_path):
     env = pengym.load(scenario_path)
 
     seed = 1
-    numpy.random.seed(seed)
+    np.random.seed(seed)
     env.action_space.seed(1)
 
     return env
@@ -272,51 +238,56 @@ def main(args):
     # Create an experiment environment using scenario path
     scenario_path = utils.replace_file_path(utils.config_info, storyboard.SCENARIO_FILE)
     print(f"* Create environment using custom scenario from '{scenario_path}'...")
-    env = create_pengym_custom_environment(scenario_path)
-
-    if utils.ENABLE_PENGYM:
-        print(f"* Read configuration from '{config_path}'...")
-        utils.init_config_info(config_path)
-        
-        print("* Initialize MSF RPC client...")
-        utils.init_msfrpc_client()
-        
-        print("* Initialize Nmap Scanner...")
-        utils.init_nmap_scanner()
-        
-        # Create host map dictionary
-        range_detail_file = utils.replace_file_path(database=utils.config_info,
-                                                     file_name=storyboard.RANGE_DETAILS_FILE)
-
-        utils.init_host_map(range_details_file=range_detail_file)
-
-        # Initializer map of service ports
-        utils.init_service_port_map()
+    env = create_pengym_environment("tiny") #to change
     
-        # Deactivate bridge that not conneccted to Internet
-        utils.init_bridge_setup(range_details_file=range_detail_file)
+    avg_reward = []
+    for number in range(5):  #five agents is the number considered in the experiment
+        if utils.ENABLE_PENGYM:
+            print(f"* Read configuration from '{config_path}'...")
+            utils.init_config_info(config_path)
+            
+            print("* Initialize MSF RPC client...")
+            utils.init_msfrpc_client()
+            
+            print("* Initialize Nmap Scanner...")
+            utils.init_nmap_scanner()
+            
+            # Create host map dictionary
+            range_detail_file = utils.replace_file_path(database=utils.config_info,
+                                                        file_name=storyboard.RANGE_DETAILS_FILE)
 
+            utils.init_host_map(range_details_file=range_detail_file)
+
+            # Initializer map of service ports
+            utils.init_service_port_map()
+        
+            # Deactivate bridge that not connected to Internet
+            utils.init_bridge_setup(range_details_file=range_detail_file)
+            
+        print(f"* Starting to train the agent {number+1} on the custom cyber range")
+        agent = training.RedAgent(env,learning_rate=0.01, initial_epsilon=1, epsilon_decay=0.95, final_epsilon=0.05, discount_factor=0.99)
+        avg_reward.append(agent.training_agent(300,2000))
+        if utils.ENABLE_PENGYM:
+            print("* Clean up MSF RPC client...")
+            utils.cleanup_msfrpc_client()
+            print("* Restore the to intial state of the firewalls for all hosts...")
+            utils.save_restore_firewall_rules_all_hosts(flag=storyboard.RESTORE)
+    avg_reward = np.mean(avg_reward,0)
+    print(avg_reward)
+    training.plot_rewards(avg_reward,1)
     # Run experiment using a random agent
-    if agent_type == AGENT_TYPE_RANDOM:
+'''if agent_type == AGENT_TYPE_RANDOM:
         print("* Perform pentesting using a RANDOM agent...")
         done, truncated, step_count = run_random_agent(env)
 
     # Run experiment using a deterministic agent
     elif agent_type == AGENT_TYPE_DETERMINISTIC:
 
-        # Set up deterministic path
-
-        # Optimal path for scenario "medium-single-site" according to "medium-single-site.yaml" note
-        deterministic_path = [ (HOST5_1, EXPLOIT_HTTP), (HOST5_1, SUBNET_SCAN),
-                        (HOST2_1, EXPLOIT_SMTP), (HOST2_1, SUBNET_SCAN),
-                        (HOST3_1, EXPLOIT_HTTP),
-                        (HOST3_4, EXPLOIT_SSH), (HOST3_4, PRIVI_ESCA_TOMCAT)]
 
         # Pentesting path for scenario "tiny" assuming need for service/process discovery
-        deterministic_path = [ (HOST5_1, OS_SCAN), (HOST5_1, SERVICE_SCAN), (HOST5_1, EXPLOIT_HTTP), (HOST5_1, SUBNET_SCAN),
-                (HOST2_1, OS_SCAN), (HOST2_1, SERVICE_SCAN), (HOST2_1, EXPLOIT_SMTP), (HOST2_1, SUBNET_SCAN),
-                (HOST3_1, OS_SCAN), (HOST3_1, SERVICE_SCAN), (HOST3_1, EXPLOIT_HTTP),
-                (HOST3_4, OS_SCAN), (HOST3_4, SERVICE_SCAN), (HOST3_4, EXPLOIT_SSH), (HOST3_4, PROCESS_SCAN), (HOST3_4, PRIVI_ESCA_TOMCAT)]
+        deterministic_path = [ (HOST1, OS_SCAN), (HOST1, SERVICE_SCAN), (HOST1, EXPLOIT_SSH), (HOST1, SUBNET_SCAN),
+                 (HOST3, OS_SCAN), (HOST3, SERVICE_SCAN), (HOST3, EXPLOIT_SSH), (HOST3, PROCESS_SCAN), (HOST3, PRIVI_ESCA_TOMCAT),
+                 (HOST2, OS_SCAN), (HOST2, SERVICE_SCAN), (HOST2, EXPLOIT_SSH), (HOST2, PROCESS_SCAN), (HOST2, PRIVI_ESCA_TOMCAT) ]
 
         print("* Execute pentesting using a DETERMINISTIC agent...")
         done, truncated, step_count = run_deterministic_agent(env, deterministic_path)
@@ -336,13 +307,7 @@ def main(args):
     else:
         # Execution finished before reaching all the goals (for deterministic agents)
         print(f"* INCOMPLETE execution: {step_count} steps")
-
-    if utils.ENABLE_PENGYM:
-        print("* Clean up MSF RPC client...")
-        utils.cleanup_msfrpc_client()
-
-        print("* Restore the to intial state of the firewalls for all hosts...")
-        utils.save_restore_firewall_rules_all_hosts(flag=storyboard.RESTORE)
+'''
 
 #############################################################################
 # Run program
@@ -350,4 +315,4 @@ if __name__ == "__main__":
     start = time.time()
     main(sys.argv[1:])
     end = time.time()
-    #print(f"Execution Time: {end-start:1.6f}s")
+    print(f"Execution Time: {end-start:1.6f}s")
