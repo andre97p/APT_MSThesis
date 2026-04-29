@@ -54,11 +54,11 @@ class RedAgent:
         current_q_values = self.get_q_values(state, 18)
         next_q_values_array = self.get_q_values(next_state, 18)
         old_q_value = current_q_values[action]
-        next_q_values = (not terminated) * np.max(next_q_values_array)
-                
-#The Bellman Equation (Q-Learning Update Rule)
+        next_q_values = (not terminated) * np.max(next_q_values_array)      
+        #The Bellman Equation (Q-Learning Update Rule)
         new_q_value = old_q_value + self.learning_rate * (reward + self.discount_factor * next_q_values - old_q_value)
         self.q_table[state][action] = new_q_value
+
 
     def training_agent(self,episodes):
             rewards=[]
@@ -109,12 +109,12 @@ class RedAgent:
         print("Initiating Q-Learning Agent with Replay buffer Training...")
         for episode in range(episodes):
             state, info = self.env.reset()
-            state= self.get_state_key(state)
             total_reward = 0
             done=False
-            while not done:
+            step=0
+            while not done or step==1000:
 
-                action=self.get_action(state)
+                action=self.get_action(str(state))
                 next_state, reward, terminated, truncated, info = self.env.step(action)
                 reward= float(reward)
                 done = terminated or truncated
@@ -123,8 +123,10 @@ class RedAgent:
                 if len(replay_buffer) >= batch_size:
                     mini_batch = sample_experience(batch_size)
                     for b_state, b_action, b_reward, b_next_state, b_done in mini_batch:
+                        b_state= self.get_state_key(b_state)
+                        b_next_state = self.get_state_key(b_next_state)
                         self.update(b_state,b_action,b_reward,b_done,b_next_state)
-                
+                step+=1
                 state = next_state
                 total_reward += reward
             
@@ -140,6 +142,14 @@ class RedAgent:
         print("Training Complete. Agent is ready for deployment.")
         return rewards
 
+class BlueAgent:
+
+    '''
+    Check status (from the IDS observations)
+    Block connections
+    Isolate host (with deactive bridges)
+    Monitor TCP SYN requests
+    '''
 
 def get_moving_avgs(arr, window, convolution_mode):
     return np.convolve(
@@ -160,3 +170,5 @@ def plot_rewards(rewards,rolling_lenght):
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.plot(range(len(rewards)),rewards, alpha=0.8, color='blue', label='Pengym Rewards')
     plt.show()
+
+
