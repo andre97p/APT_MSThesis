@@ -51,6 +51,7 @@ AGENT_TYPE_DETERMINISTIC = "deterministic"
 DEFAULT_AGENT_TYPE = AGENT_TYPE_DETERMINISTIC
 
 # Other constants
+N_EPISODES=4000
 MAX_STEPS = 150 # Max number of pentesting steps (sys.maxsize to disable)
 RENDER_OBS_STATE = False
 
@@ -238,7 +239,7 @@ def main(args):
     # Create an experiment environment using scenario path
     scenario_path = utils.replace_file_path(utils.config_info, storyboard.SCENARIO_FILE)
     print(f"* Create environment using custom scenario from '{scenario_path}'...")
-    env = create_pengym_environment("tiny") #to change
+    env = create_pengym_environment("tiny")
     
     avg_reward = []
     for number in range(5):  #five agents is the number considered in the experiment
@@ -265,8 +266,8 @@ def main(args):
             utils.init_bridge_setup(range_details_file=range_detail_file)
             
         print(f"* Starting to train the agent {number+1} on the custom cyber range")
-        agent = training.RedAgent(env,learning_rate=0.01, initial_epsilon=1, epsilon_decay=0.95, final_epsilon=0.05, discount_factor=0.99)
-        avg_reward.append(agent.training_agent(300,2000))
+        agent = training.RedAgent(env,learning_rate=0.01, initial_epsilon=1, epsilon_decay=1 / (N_EPISODES / 2), final_epsilon=0.05, discount_factor=0.99)
+        avg_reward.append(agent.training_agent(4000))
         if utils.ENABLE_PENGYM:
             print("* Clean up MSF RPC client...")
             utils.cleanup_msfrpc_client()

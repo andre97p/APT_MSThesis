@@ -20,7 +20,7 @@ class RedAgent:
         self.env= env
         self.q_table= {}
         self.learning_rate = learning_rate
-        self.discount_factor = discount_factor  # How much we care about future rewards
+        self.discount_factor = discount_factor
 
         # Exploration parameters
         self.epsilon = initial_epsilon
@@ -51,7 +51,6 @@ class RedAgent:
             terminated: bool,
             next_state
     ):
-        #action_size = self.env.action_space.n
         current_q_values = self.get_q_values(state, 18)
         next_q_values_array = self.get_q_values(next_state, 18)
         old_q_value = current_q_values[action]
@@ -61,14 +60,16 @@ class RedAgent:
         new_q_value = old_q_value + self.learning_rate * (reward + self.discount_factor * next_q_values - old_q_value)
         self.q_table[state][action] = new_q_value
 
-    def training_agent(self,episodes,max_steps):
+    def training_agent(self,episodes):
             rewards=[]
             print("Initiating Q-Learning Agent Training...")
             for episode in range(episodes):
                 state, info = self.env.reset()
                 state= self.get_state_key(state)
                 total_reward = 0
-                for _ in range(max_steps):
+                done=False
+                step=0
+                while not done or step==1000:
                     action= self.get_action(state)
                     #Execute the action in the environment
                     next_state, reward, terminated, truncated, info = self.env.step(action)
@@ -80,6 +81,7 @@ class RedAgent:
                     
                     state = next_state
                     total_reward += reward
+                    step+=1
                     
                     if done: 
                         rewards.append(total_reward) 
@@ -93,7 +95,7 @@ class RedAgent:
             print("Training Complete. Agent is ready for deployment.")
             return rewards
 
-    def training_agent_buffer(self, episodes,max_steps,capacity,batch_size):
+    def training_agent_buffer(self, episodes,capacity,batch_size):
         rewards=[]
         replay_buffer=deque(maxlen=capacity)
 
@@ -107,23 +109,20 @@ class RedAgent:
         print("Initiating Q-Learning Agent with Replay buffer Training...")
         for episode in range(episodes):
             state, info = self.env.reset()
-
+            state= self.get_state_key(state)
             total_reward = 0
-            
-            for _ in range(max_steps):
+            done=False
+            while not done:
 
                 action=self.get_action(state)
                 next_state, reward, terminated, truncated, info = self.env.step(action)
                 reward= float(reward)
                 done = terminated or truncated
-                
                 store_experience(state, action, reward, next_state, done)
 
                 if len(replay_buffer) >= batch_size:
                     mini_batch = sample_experience(batch_size)
-                    
                     for b_state, b_action, b_reward, b_next_state, b_done in mini_batch:
-                        
                         self.update(b_state,b_action,b_reward,b_done,b_next_state)
                 
                 state = next_state
@@ -159,5 +158,5 @@ def plot_rewards(rewards,rolling_lenght):
     plt.xlabel('Episode')
     plt.ylabel('Total Reward')
     plt.grid(True, linestyle='--', alpha=0.6)
-    plt.plot(range(300),rewards, alpha=0.8, color='blue', label='Pengym Rewards')
+    plt.plot(range(len(rewards)),rewards, alpha=0.8, color='blue', label='Pengym Rewards')
     plt.show()

@@ -45,6 +45,9 @@ service_scan_cost: 1
 os_scan_cost: 1
 subnet_scan_cost: 1
 process_scan_cost: 1
+check_status_cost: 1 #analyze the IDS observation to establish compromised systems
+block_connection_cost: 1 #change the firewall rules
+restart_machine_cost: 3 #reboot the system
 host_configurations:
   (1, 0):
     os: linux
