@@ -33,6 +33,8 @@ PRIVI_ESCA_TOMCAT = 'PrivilegeEscalation_Tomcat'
 PRIVI_ESCA_PROFTPD = 'PrivilegeEscalation_Proftpd'
 PRIVI_ESCA_CRON = 'PrivilegeEscalation_Cron'
 
+
+
 ACTION_NAMES = {SUBNET_SCAN: "subnet_scan", OS_SCAN: "os_scan", SERVICE_SCAN: "service_scan", PROCESS_SCAN: "process_scan",
                 EXPLOIT_SSH: "e_ssh",  EXPLOIT_FTP: "e_ftp", EXPLOIT_SAMBA: "e_samba", EXPLOIT_SMTP: "e_smtp", EXPLOIT_HTTP: "e_http", 
                 PRIVI_ESCA_TOMCAT: "pe_tomcat", PRIVI_ESCA_PROFTPD: "pe_daclsvc", PRIVI_ESCA_CRON: "pe_schtask"}
@@ -267,14 +269,13 @@ def main(args):
             
         print(f"* Starting to train the agent {number+1} on the custom cyber range")
         agent = training.RedAgent(env,learning_rate=0.01, initial_epsilon=1, epsilon_decay=1 / (N_EPISODES / 2), final_epsilon=0.05, discount_factor=0.99)
-        avg_reward.append(agent.training_agent(4000))
+        avg_reward.append(agent.training_agent_buffer(300,200,32))
         if utils.ENABLE_PENGYM:
             print("* Clean up MSF RPC client...")
             utils.cleanup_msfrpc_client()
             print("* Restore the to intial state of the firewalls for all hosts...")
             utils.save_restore_firewall_rules_all_hosts(flag=storyboard.RESTORE)
     avg_reward = np.mean(avg_reward,0)
-    print(avg_reward)
     training.plot_rewards(avg_reward,1)
     # Run experiment using a random agent
 '''if agent_type == AGENT_TYPE_RANDOM:

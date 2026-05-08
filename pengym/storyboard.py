@@ -57,6 +57,8 @@ class Storyboard():
     OS_SCAN_STATE = 'os_scan_state'
     SUBNET_INSTANCE = 'subnet_instance'
     BRIDGES = 'bridges'
+    CHECK_STATUS= 'check_status'
+    ISOLATE_HOST = 'isolate_host'
 
     # Constant values for PenGymNetwork, PenGymHostVector
     TAG_NASIM_PENGYM = 'nasim/pengym'
@@ -177,3 +179,4 @@ class Storyboard():
     MEMBERS = 'members'
     HOST = 'host'
     FIREWALL = 'firewall'
+    BLOCK_CONNECTIONS= 'iptables -P FORWARD DROP'
