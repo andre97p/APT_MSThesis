@@ -148,7 +148,6 @@ class BlueAgent:
     Check status (from the IDS observations)
     Block connections
     Isolate host (with deactive bridges)
-    Monitor TCP SYN requests
     '''
 
 def get_moving_avgs(arr, window, convolution_mode):

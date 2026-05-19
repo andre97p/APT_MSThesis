@@ -22,8 +22,7 @@ class PenGymEnv(NASimEnv):
         """
 
         # Call the superclass __init__ function
-        super().__init__(scenario, fully_obs, flat_actions, flat_obs)
-
+        super().__init__(scenario, fully_obs, flat_actions, flat_obs) 
         # Initialize a PenGymNetwork object from the scenario
         self.network = PenGymNetwork(scenario)
 

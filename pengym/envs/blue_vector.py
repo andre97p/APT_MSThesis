@@ -35,6 +35,6 @@ class BlueActionExecutor:
     def do_isolate_host(self, host_ip):
         """Isolates the host by routing all traffic to a null interface or dropping the gateway."""
         logging.info(f"[Blue] Isolating host {host_ip}")
-        cmd = f"ssh vagrant@{host_ip} 'sudo ip link set eth1 down'" #TO BE CHANGED WITH THE RIGHT INTERFACE
+        cmd = f"ssh vagrant@{host_ip} 'sudo ip link set eth1 down'"
         result = subprocess.run(cmd, shell=True)
         return result.returncode == 0
