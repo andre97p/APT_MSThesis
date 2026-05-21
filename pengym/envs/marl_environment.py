@@ -6,6 +6,10 @@ from pettingzoo.utils import agent_selector, wrappers, AgentSelector
 from environment import PenGymEnv
 import pengym.utilities as utils
 import functools
+import ray
+from ray import tune
+from ray.rllib.algorithms.ppo import PPOConfig
+
 
 def env(scenario, fully_obs=False, flat_actions=True, flat_obs=True):
     """
@@ -36,7 +40,7 @@ class PenGymMultiEnv(AECEnv):
 
         self.observation_Spaces = {
             "attacker": self.pengym_env.observation_space,
-            "defender": self.pengym_env.observation_space      #check the actual visibility
+            "defender": self.pengym_env.observation_space      #WATCH OUT check the actual implementation of the environment
         }
     @functools.lru_cache(None)
     def get_observation_space(self,agent):
@@ -83,7 +87,38 @@ class PenGymMultiEnv(AECEnv):
 
             self.selected_agent= self.agent_selectors.next()
 
+    def config_PPO(self):
+        ray.init(ignore_reinit_error=True)
+        tune.register_env("PenGymMultiEnv-v0", lambda config: PenGymMultiEnv(config))
+
+        config = (
+            PPOConfig()
+            .environment("PenGymMultiEnv-v0")
+            .framework("torch") # Use PyTorch
+            .multi_agent(
+                policies={
+                    # Format: (policy_class, obs_space, act_space, config_overrides)
+                    # None defaults to the algorithm's standard policy (PPO in this case)
+                    "attacker_policy": (None, self.observation_Spaces["attacker"], self.action_Spaces["attacker"], {}),
+                    "defender_policy": (None, self.observation_Spaces["defender"], self.action_Spaces["defender"], {}),
+                },
+                # Map the agent string ID from the environment to the specific policy name
+                policy_mapping_fn=lambda agent_id, episode, worker, **kwargs: 
+                    "attacker_policy" if agent_id == "attacker" else "defender_policy"
+            )
+    .training(
+        train_batch_size=1000, 
+        sgd_minibatch_size=128
+    )
+    .rollouts(num_rollout_workers=1) # distributed training
+)
+        algo=config.build()
+
+    #def execute_PPO(self):
+
+
     def close(self):
         self.pengym_env.close()
+        ray.shutdown
 
 
