@@ -1,92 +1,94 @@
 import gymnasium as gym
 from gymnasium.utils import seeding
 from gymnasium.spaces import Discrete
-from pettingzoo import AECEnv
-from pettingzoo.utils import agent_selector, wrappers, AgentSelector
 from environment import PenGymEnv
 import pengym.utilities as utils
-import functools
+import random
 import ray
 from ray import tune
 from ray.rllib.algorithms.ppo import PPOConfig
+from ray.rllib.env.multi_agent_env import MultiAgentEnv
+from ray.rllib.utils.typing import MultiAgentDict
+from typing import Tuple
 
-
-def env(scenario, fully_obs=False, flat_actions=True, flat_obs=True):
-    """
-    The env function often wraps the environment in standard PettingZoo wrappers.
-    """
-    internal_env = PenGymMultiEnv(scenario, fully_obs, flat_actions, flat_obs)
-    internal_env = wrappers.TerminateIllegalWrapper(internal_env, illegal_reward=-1)
-    internal_env = wrappers.AssertOutOfBoundsWrapper(internal_env)
-    internal_env = wrappers.OrderEnforcingWrapper(internal_env)
-    return internal_env
-
-class PenGymMultiEnv(AECEnv):
+class PenGymMultiEnv(MultiAgentEnv):
 
     """
     A PettingZoo extension of Pengym environment paradigm
     """
-    def __init__(self,scenario, fully_obs=False,flat_actions=True,flat_obs=True):
+    def __init__(self, environment):
         super().__init__()
 
-
+        scenario = environment.get("scenario_name", "medium-multi-site")
+        fully_obs = environment.get("fully_obs", False)
+        flat_actions = environment.get("flat_actions", True)
+        flat_obs = environment.get("flat_obs", True)
         self.pengym_env = PenGymEnv(scenario, fully_obs, flat_actions, flat_obs)
-        self.agent_ID= ["attacker","defender"]
+        self.agents = self.possible_agents = ["attacker", "defender"]
 
-        self.action_Spaces = {
+        self.action_spaces = {
             "attacker": self.pengym_env.action_space,
             "defender": Discrete(3)
         }
 
-        self.observation_Spaces = {
+        self.observation_spaces = {
             "attacker": self.pengym_env.observation_space,
             "defender": self.pengym_env.observation_space      #WATCH OUT check the actual implementation of the environment
         }
-    @functools.lru_cache(None)
-    def get_observation_space(self,agent):
-        return self.observation_Spaces[agent]
-    @functools.lru_cache(None)
-    def get_action_space(self,agent):
-        return self.action_Spaces[agent]
+
     
-    def reset(self,seed=None,options=None):
-        if seed is not None:
-            self.np_random, self.np_random_seed = seeding.np_random(seed)
+    def reset(self,*,seed=None,options=None)-> Tuple[MultiAgentDict, MultiAgentDict]:
+        obs,info = self.pengym_env.reset(seed=seed,options=options)
+
         self.agents = self.possible_agents[:]
-        self.rewards = {agent: 0 for agent in self.agent_ID}
-        self._cumulative_rewards = {agent: 0 for agent in self.agent_ID}
-        self.terminations = {agent: False for agent in self.agent_ID}
-        self.truncations = {agent: False for agent in self.agent_ID}
-        obs,info= self.pengym_env.reset(seed=seed,options=options)
+        self.rewards = {agent: 0 for agent in self.agents}
+        self._cumulative_rewards = {agent: 0 for agent in self.agents}
+        self.terminations = {agent: False for agent in self.agents}
+        self.truncations = {agent: False for agent in self.agents}
         self.state = obs
-        self.infos["attacker"]=info
-        self.agent_selectors = AgentSelector(self.agent_ID)
-        self.selected_agent= self.agent_selectors.next()
+        self.infos={
+            "attacker":info,
+            "defender":info
+        }
+        self.current_agent = random.choice(self.agents)
         self.steps=0
+        self.state: MultiAgentDict = {self.current_agent: obs}
+        self.infos: MultiAgentDict = {
+            "attacker": info if self.current_agent == "attacker" else {},
+            "defender": info if self.current_agent == "defender" else {}
+        }
+        return self.state,{self.current_agent:info}
+    
+    def step(self,action_dict)-> Tuple[MultiAgentDict, MultiAgentDict, MultiAgentDict, MultiAgentDict, MultiAgentDict]:
+        self.state: MultiAgentDict
+        action=action_dict.get(self.current_agent)
 
-    def step(self,action):
-
-        if self.terminations[self.selected_agent] or self.truncations[self.selected_agent]:
+        if self.terminations.get(self.current_agent) or self.truncations.get(self.current_agent):
             print("Epoch is over")
-            self._was_dead_step(action=action)
-            return
+            pass
         
         else:
-            if self.selected_agent=="attacker":
-                obs,attacker_reward,terminated,truncated,attacker_info= self.pengym_env.step(action)
-                self.state=obs
+            if self.current_agent=="attacker":
+                print("Red Agent Turn")
+                obs, attacker_reward,terminated,truncated,attacker_info= self.pengym_env.step(action)
+                self.state["attacker","defender"]=obs #to be confirmed
                 self.rewards["attacker"]= attacker_reward
                 self.rewards["defender"]= -attacker_reward
-                self.terminations={a: terminated for a in self.agent_ID}
-                self.truncations={a: truncated for a in self.agent_ID}
+                self.terminations={a: terminated for a in self.agents}
+                self.truncations={a: truncated for a in self.agents}
                 self.infos["attacker"]=attacker_info
+                self.current_agent="defender"
 
-            elif self.selected_agent=="defender":
-               print()
-                
+            elif self.current_agent=="defender":
+               print("Blue Agent Turn")
+               """
+               """
+               
+               self.current_agent="attacker"
 
-            self.selected_agent= self.agent_selectors.next()
-
+            self.steps+=1    
+        return (self.state,self.rewards, self.terminations, self.truncations, self.infos)
+    
     def config_PPO(self):
         ray.init(ignore_reinit_error=True)
         tune.register_env("PenGymMultiEnv-v0", lambda config: PenGymMultiEnv(config))
@@ -99,12 +101,12 @@ class PenGymMultiEnv(AECEnv):
                 policies={
                     # Format: (policy_class, obs_space, act_space, config_overrides)
                     # None defaults to the algorithm's standard policy (PPO in this case)
-                    "attacker_policy": (None, self.observation_Spaces["attacker"], self.action_Spaces["attacker"], {}),
-                    "defender_policy": (None, self.observation_Spaces["defender"], self.action_Spaces["defender"], {}),
+                    #"attacker_policy": (None, self.observation_spaces["attacker"], self.action_spaces["attacker"], {}),
+                    #"defender_policy": (None, self.observation_spaces["defender"], self.action_spaces["defender"], {}),
                 },
                 # Map the agent string ID from the environment to the specific policy name
-                policy_mapping_fn=lambda agent_id, episode, worker, **kwargs: 
-                    "attacker_policy" if agent_id == "attacker" else "defender_policy"
+                #policy_mapping_fn=lambda agent_id, episode, worker, **kwargs: 
+                 #   "attacker_policy" if agent_id == "attacker" else "defender_policy"
             )
     .training(
         train_batch_size=1000, 
@@ -112,13 +114,13 @@ class PenGymMultiEnv(AECEnv):
     )
     .rollouts(num_rollout_workers=1) # distributed training
 )
-        algo=config.build()
+        
 
     #def execute_PPO(self):
-
+        #algo = config.build()
 
     def close(self):
         self.pengym_env.close()
-        ray.shutdown
+        ray.shutdown    
 
 

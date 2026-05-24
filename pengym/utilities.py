@@ -704,3 +704,16 @@ def replace_file_path(database, file_name):
             .replace(storyboard.PENGYM_SOURCE_PATTERN, database[storyboard.PENGYM_SOURCE])\
             .replace(storyboard.RANGE_ID_PATTERN, str(database[storyboard.RANGE_ID]))\
             .replace(storyboard.CYBER_RANGE_DIR_PATTERN, database[storyboard.CYBER_RANGE_DIR])
+
+def do_isolate_host(host_ip):
+        """Isolates the host by routing all traffic to a null interface.
+        
+        Args:
+            host_ip: the ip address to isolate from the network
+
+        Returns:
+            The actual code of the operation outcome
+        """
+        cmd = f"ssh vagrant@{host_ip} sudo ip link set br126-1-2 down"
+        result = subprocess.run(cmd, shell=True)
+        return result.returncode == 0

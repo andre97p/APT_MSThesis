@@ -35,9 +35,13 @@ PRIVI_ESCA_CRON = 'PrivilegeEscalation_Cron'
 
 
 
-ACTION_NAMES = {SUBNET_SCAN: "subnet_scan", OS_SCAN: "os_scan", SERVICE_SCAN: "service_scan", PROCESS_SCAN: "process_scan",
+RED_ACTION_NAMES = {SUBNET_SCAN: "subnet_scan", OS_SCAN: "os_scan", SERVICE_SCAN: "service_scan", PROCESS_SCAN: "process_scan",
                 EXPLOIT_SSH: "e_ssh",  EXPLOIT_FTP: "e_ftp", EXPLOIT_SAMBA: "e_samba", EXPLOIT_SMTP: "e_smtp", EXPLOIT_HTTP: "e_http", 
                 PRIVI_ESCA_TOMCAT: "pe_tomcat", PRIVI_ESCA_PROFTPD: "pe_daclsvc", PRIVI_ESCA_CRON: "pe_schtask"}
+
+BLUE_ACTION_NAMES = {
+    BLOCK_SSH: "block_ssh", BLOCK_FTP:"block_ftp", BLOCK_HTTP:"block_http", BLOCK_SAMBA:"block_samba",BLOCK_SMTP:"block_smtp",ISOLATE_HOST:"isolate_host",CHECK_ALERT:"check_alert"
+}
 
 HOST1 = 'host1'
 HOST2 = 'host2'
@@ -119,7 +123,7 @@ def run_deterministic_agent(env, deterministic_path):
 
         # Retrieve the next action to be executed
         action_tuple = deterministic_path[step_count]
-        action = select_action(env.action_space, ACTION_NAMES[action_tuple[1]], ACTION_TARGETS[action_tuple[0]])
+        action = select_action(env.action_space, RED_ACTION_NAMES[action_tuple[1]], ACTION_TARGETS[action_tuple[0]])
 
         # Increment step count and execute action
         step_count = step_count + 1
