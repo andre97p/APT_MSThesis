@@ -59,7 +59,8 @@ class Storyboard():
     BRIDGES = 'bridges'
     CHECK_STATUS= 'check_status'
     ISOLATE_HOST = 'isolate_host'
-
+    ISOLATED_HOSTS = 'isolated_hosts'
+    ALERTS= 'alerts'
     # Constant values for PenGymNetwork, PenGymHostVector
     TAG_NASIM_PENGYM = 'nasim/pengym'
     TAG_NASIM = '  [nasim]'
@@ -118,7 +119,7 @@ class Storyboard():
     CYRIS_DESCRIPTION_FILE = 'cyris_description_file'
     SCENARIO_FILE = 'scenario_file'
     FIREWALL_RULE_PATH = 'firewall_rule_path'
-
+    
     ## Host settings
     HOST_SETTINGS = 'host_settings'
     ID = 'id'
@@ -154,7 +155,9 @@ class Storyboard():
     BASH = 'bash'
     AFTER_CLONE = 'after_clone'
     EXECUTE_TIME = 'execute_time'
-
+    CURRENT_SID='current_sid'
+    BLOCK_CONNECTIONS= 'block_connections'
+    
     ## Clone settings
     CLONE_SETTINGS = 'clone_settings'
     RANGE_ID = 'range_id'
@@ -179,4 +182,4 @@ class Storyboard():
     MEMBERS = 'members'
     HOST = 'host'
     FIREWALL = 'firewall'
-    BLOCK_CONNECTIONS= 'iptables -P FORWARD DROP'
+    
