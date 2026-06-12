@@ -859,6 +859,7 @@ def unlock_connections(backup_path="/etc/snort/rules/local.rules.bak", rule_path
     execute_script(f"logger -t SNORT_AR '{syslog_msg}'")
     
     return True
+
  
 def _get_interface_guest(domain_name, hypervisor_target="root@192.168.1.1"):
     """
@@ -889,3 +890,9 @@ def _get_interface_guest(domain_name, hypervisor_target="root@192.168.1.1"):
         return None
         
     return None
+
+def do_nothing():
+    """
+    The defender keep resources until a suspicious event will occur.
+    """
+    return True

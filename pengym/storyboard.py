@@ -60,6 +60,7 @@ class Storyboard():
     CHECK_STATUS= 'check_status'
     ISOLATE_HOST = 'isolate_host'
     ISOLATED_HOSTS = 'isolated_hosts'
+    DO_NOTHING='do_nothing'
     ALERTS= 'alerts'
     # Constant values for PenGymNetwork, PenGymHostVector
     TAG_NASIM_PENGYM = 'nasim/pengym'
