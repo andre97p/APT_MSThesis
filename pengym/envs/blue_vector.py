@@ -41,6 +41,7 @@ class BlueActionExecutor:
 
 
     def compute_reward(self,action_type,result,delta_t):
+        beta=0.01
         """
         Compute the rewards based on the Bernoulli distribution...
         The designed values for the specific actions are the following:
@@ -49,7 +50,7 @@ class BlueActionExecutor:
         Block_connections:R=6,C=3
         Do_Nothing:R=0,C:1
         """
-        mu= min(100, math.exp(0.01*delta_t))
+        mu= min(100, math.exp(beta*delta_t))
         actual_reward=self.action_reward[action_type] if result==True else 0
         formula = (actual_reward - self.action_cost[action_type]) - mu
         

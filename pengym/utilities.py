@@ -860,7 +860,30 @@ def unlock_connections(backup_path="/etc/snort/rules/local.rules.bak", rule_path
     
     return True
 
- 
+
+def get_active_snort_rules(rule_path="/etc/snort/rules/local.rules"):
+    """
+    Parses the active Snort rules configuration file to extract the deployed
+    packet filtering heuristics. Returns an array of active rule signatures
+    to populate the Blue Team agent's observation vector.
+    """
+    command = f"sudo cat {rule_path}"
+    
+    try:
+        raw_rules = subprocess.check_output(command, shell=True, text=True)
+        
+        parsed_rules = []
+        for line in raw_rules.split('\n'):
+            clean_line = line.strip()
+            if clean_line and not clean_line.startswith('#'):
+                parsed_rules.append(clean_line)
+                
+        return parsed_rules
+        
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Failed to poll Snort rules facility at {rule_path}. Exit code: {e.returncode}"
+        execute_script(f"logger -t PENGYM_ERR '{error_msg}'")
+        return []
 def _get_interface_guest(domain_name, hypervisor_target="root@192.168.1.1"):
     """
     Dynamically resolves the network interface (e.g., vnet0, tap1) bound to a KVM guest 

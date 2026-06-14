@@ -1,15 +1,16 @@
 import gymnasium as gym
 from gymnasium.utils import seeding
-from gymnasium.spaces import Discrete,Space
+from gymnasium.spaces import Discrete,Space, MultiBinary
 from environment import PenGymEnv
 import random
+import numpy as np
 import ray
 from ray import tune
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from ray.rllib.utils.typing import MultiAgentDict
 from ray.rllib.policy.policy import PolicySpec
-from typing import Tuple,Dict
+from typing import Tuple,Dict, Mul
 import utilities as utils
 from storyboard import Storyboard
 from blue_vector import BlueActionExecutor
@@ -36,13 +37,64 @@ class PenGymMultiEnv(MultiAgentEnv):
             "attacker": self.pengym_env.action_space,
             "defender": Discrete(4)
         }
+        num_nodes= self.pengym_env.network.nodes
+        num_services = self.pengym_env.network.num_services
+        num_os = self.pengym_env.network.num_os
 
         self.observation_Space = {
             "attacker": self.pengym_env.observation_space,
-            "defender": self.pengym_env.observation_space      #WATCH OUT check the actual implementation of the environment
+            "defender": Dict({
+                "topology": MultiBinary(num_nodes),
+                "system_configs_services": MultiBinary(num_nodes * num_services),
+                "system_configs_os": MultiBinary(num_nodes * self.num_os),
+                "active_alerts": MultiBinary(num_nodes),
+                "firewall_status": MultiBinary(num_nodes * num_services)
+
+        } )
         }
 
-    
+
+    def _get_defender_obs(self) -> dict:
+        """
+        Extracts and returns the partial observations visible strictly to the defender agent.
+        """
+
+        topology = self.pengym_env.network.topology if hasattr(self.pengym_env, 'network') else []
+
+        system_configurations = {}
+        system_os = {}
+        
+        # Verify the underlying environment state instances are properly instantiated
+        if hasattr(self.pengym_env, 'network') and hasattr(self.pengym_env, 'current_state'):
+            for host_addr in self.pengym_env.network.address_space:
+                addr_str = str(host_addr)
+                
+                host_vector = self.pengym_env.current_state.get_host(host_addr)
+                system_configurations[addr_str] = host_vector.services
+                system_os[addr_str] = host_vector.os
+                
+        active_alerts = utils.alerts if hasattr(utils, 'alerts') else []
+
+        active_rules = utils.get_active_snort_rules() if hasattr(utils, 'get_active_snort_rules') else []
+        
+        # TO BE VALIDATED: Dynamic isolation remains tracked in utils as it interacts via external SSH virsh hooks.
+        dynamic_isolation = utils.isolated_hosts if hasattr(utils, 'isolated_hosts') else {}
+        
+        firewall_rules = {
+            "active_rules": active_rules,
+        }
+
+        # Aggregate into the local observation dictionary payload
+        defender_obs = {
+            "topology": topology,
+            "system_configurations": system_configurations,
+            "system_os": system_os,
+            "active_alerts": active_alerts,
+            "firewall_rules": firewall_rules
+        }
+
+        return defender_obs
+
     def reset(self,*,seed=None,options=None)-> Tuple[MultiAgentDict, MultiAgentDict]:
         obs,info = self.pengym_env.reset(seed=seed,options=options)
 
@@ -104,7 +156,7 @@ class PenGymMultiEnv(MultiAgentEnv):
             self.terminations = {a: terminated for a in self.agents}
             self.truncations = {a: truncated for a in self.agents}
             infos["attacker"] = attacker_info
-            
+            self.last_obs= self._get_defender_obs()
             self.observation_Space["defender"]= self.last_obs
 
         elif self.current_agent == "defender":
