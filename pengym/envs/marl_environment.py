@@ -13,6 +13,7 @@ from typing import Tuple,Dict
 import utilities as utils
 from storyboard import Storyboard
 from blue_vector import BlueActionExecutor
+from typing import cast
 
 class PenGymMultiEnv(MultiAgentEnv):
 
@@ -33,7 +34,7 @@ class PenGymMultiEnv(MultiAgentEnv):
         self.blue_executor= BlueActionExecutor(config=environment)
         self.action_Space = {
             "attacker": self.pengym_env.action_space,
-            "defender": Discrete(3)
+            "defender": Discrete(4)
         }
 
         self.observation_Space = {
@@ -72,56 +73,10 @@ class PenGymMultiEnv(MultiAgentEnv):
         }
         return self.state,{self.current_agent:info}
     
-    def step(self,action_dict)-> Tuple[MultiAgentDict, MultiAgentDict, MultiAgentDict, MultiAgentDict, MultiAgentDict]:
-        """step_obs = {}
-        step_rewards = {agent: 0.0 for agent in self.agents}
-        step_terminations = {"__all__": False}
-        step_truncations = {"__all__": False}
-        step_infos = {}
-        self.state: MultiAgentDict
-        action=action_dict.get(self.current_agent)
 
-        if self.terminations.get(self.current_agent) or self.truncations.get(self.current_agent):
-            print("Epoch is over")
-            pass
-        
-        else:
-            if self.current_agent=="attacker":
-                print("Red Agent Turn")
-                obs, attacker_reward,terminated,truncated,attacker_info = self.pengym_env.step(action)
-                self.state["attacker","defender"]=obs #to be confirmed
-                step_rewards["defender"] = float(- attacker_reward)
-                step_rewards["attacker"] = float(attacker_reward)
-                
-                step_infos["attacker"]=attacker_info
-                self.current_agent="defender"
-
-            elif self.current_agent=="defender":
-               print("Blue Agent Turn")
-               obs, defender_reward,terminated,truncated,defender_info = self.pengym_env.step(action)
-               step_rewards["defender"] = float(defender_reward)
-               step_rewards["attacker"] = float(-defender_reward)
-               step_infos["defender"]= defender_info
-               self.current_agent="attacker"
-               self.state["attacker","defender"]=obs
-
-
-            step_terminations["__all__"] = terminated
-            step_truncations["__all__"] = truncated
-            if not terminated and not truncated:
-                step_obs[self.current_agent] = obs
-
-            self.state = step_obs
-            self.terminations = step_terminations
-            self.truncations = step_truncations
-            self.infos.update(step_infos)
-            self.steps+=1
-
-        return (step_obs,step_rewards, step_terminations, step_truncations, step_infos)"""
-
-def step(self, action_dict) -> Tuple[MultiAgentDict, MultiAgentDict, MultiAgentDict, MultiAgentDict, MultiAgentDict]:
+    def step(self, action_dict) -> Tuple[MultiAgentDict, MultiAgentDict, MultiAgentDict, MultiAgentDict, MultiAgentDict]:
+        opponent = "attacker" if self.current_agent == "defender" else "defender"
         action = action_dict.get(self.current_agent)
-
         rewards = {a: 0 for a in self.agents}
         terminations = {"__all__": False}
         truncations = {"__all__": False}
@@ -131,7 +86,11 @@ def step(self, action_dict) -> Tuple[MultiAgentDict, MultiAgentDict, MultiAgentD
         if self.terminations.get(self.current_agent) or self.truncations.get(self.current_agent):
             print("Epoch is over")
             terminations["__all__"] = True
-            return {}, rewards, terminations, truncations, infos
+            return (cast(MultiAgentDict, {}),
+            cast(MultiAgentDict, rewards),
+            cast(MultiAgentDict, terminations),
+            cast(MultiAgentDict, truncations),
+            cast(MultiAgentDict, infos))
         
         if self.current_agent == "attacker":
             print("Red Agent Turn")
@@ -146,48 +105,52 @@ def step(self, action_dict) -> Tuple[MultiAgentDict, MultiAgentDict, MultiAgentD
             self.truncations = {a: truncated for a in self.agents}
             infos["attacker"] = attacker_info
             
-            # Transition phase to Blue Team
-            self.current_agent = "defender"
-            state = {"defender": self.last_obs}
+            self.observation_Space["defender"]= self.last_obs
 
         elif self.current_agent == "defender":
             print("Blue Agent Turn")
             
-            # 1. Decode Action Space
-            action_idx = int(action)
+            # Decode Action Space
+
             action_mapping = {
-                0: getattr(Storyboard, "CHECK_STATUS", "CHECK_STATUS"),
-                1: getattr(Storyboard, "BLOCK_CONNECTIONS", "BLOCK_CONNECTIONS"),
-                2: getattr(Storyboard, "ISOLATE_HOST", "ISOLATE_HOST")
+                0: getattr(Storyboard, "CHECK_STATUS"),
+                1: getattr(Storyboard, "BLOCK_CONNECTIONS"),
+                2: getattr(Storyboard, "ISOLATE_HOST"),
+                3: getattr(Storyboard, "DO_NOTHING")
             }
-            action_type = action_mapping.get(action_idx, getattr(Storyboard, "CHECK_STATUS", "CHECK_STATUS"))
-            
+    
+            parsed_action = int(action) if action is not None else 3
+            action_type = action_mapping.get(parsed_action, getattr(Storyboard, "DO_NOTHING"))
             
             target_ip = None
             if utils.alerts and len(utils.alerts) > 0:
                 # Target the source IP of the latest anomalous flow for mitigation/isolation
                 target_ip = utils.alerts[-1].get("src_ip")
  
-            defense_success = self.blue_executor.execute_action(action_type, target_host_ip=target_ip,self.steps)
+            actual_reward = self.blue_executor.execute_action(action_type = action_type, target_host_ip=target_ip,timestep=self.steps)
+            rewards["defender"]= actual_reward
+            rewards["attacker"]= -actual_reward
             
             infos["defender"] = {
                 "executed_action": action_type,
                 "target_ip": target_ip,
-                "success": defense_success
+                "success": rewards
             }
-            
-            
-            self.current_agent = "attacker"
-            state = {"attacker": self.last_obs}
+              
+            self.observation_Space["attacker"]= self.last_obs
 
         # Sync dictionary structures to RLlib MultiAgent specs
-        terminations.update(self.terminations)
-        truncations.update(self.truncations)
+
         terminations["__all__"] = all(self.terminations.values())
         truncations["__all__"] = all(self.truncations.values())
+        self.current_agent=opponent
+        self.steps += 1
 
-        self.steps += 1    
-        return state, rewards, terminations, truncations, infos
+        return (cast(MultiAgentDict,self.last_obs),
+            cast(MultiAgentDict, rewards),
+            cast(MultiAgentDict, terminations),
+            cast(MultiAgentDict, truncations),
+            cast(MultiAgentDict, infos))
     
 
 def close(self):
