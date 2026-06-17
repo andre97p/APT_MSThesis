@@ -804,7 +804,7 @@ def block_connections(target_ip=None, rule_path="/etc/snort/rules/local.rules"):
     
     if not alerts:
         return False
-        
+    
     mitigation_rules = []
     
     # Instantiate a set to guarantee idempotency and avoid duplicate rule injection overhead

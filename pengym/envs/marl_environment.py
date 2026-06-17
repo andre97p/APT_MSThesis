@@ -10,7 +10,7 @@ from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from ray.rllib.utils.typing import MultiAgentDict
 from ray.rllib.policy.policy import PolicySpec
-from typing import Tuple,Dict, Mul
+from typing import Tuple,Dict
 import utilities as utils
 from storyboard import Storyboard
 from blue_vector import BlueActionExecutor
@@ -21,8 +21,7 @@ class PenGymMultiEnv(MultiAgentEnv):
     """
     A Multi-Agent extension of Pengym environment
     """
-    action_Space: Dict[str, Space]
-    observation_Space: Dict[str, Space]
+
     def __init__(self, environment):
         super().__init__()
 
@@ -37,22 +36,20 @@ class PenGymMultiEnv(MultiAgentEnv):
             "attacker": self.pengym_env.action_space,
             "defender": Discrete(4)
         }
-        num_nodes= self.pengym_env.network.nodes
-        num_services = self.pengym_env.network.num_services
-        num_os = self.pengym_env.network.num_os
+        num_nodes= len(self.pengym_env.network.hosts)
+        num_services = 4
+        num_os = 1
 
         self.observation_Space = {
             "attacker": self.pengym_env.observation_space,
-            "defender": Dict({
+            "defender": {
                 "topology": MultiBinary(num_nodes),
                 "system_configs_services": MultiBinary(num_nodes * num_services),
-                "system_configs_os": MultiBinary(num_nodes * self.num_os),
-                "active_alerts": MultiBinary(num_nodes),
-                "firewall_status": MultiBinary(num_nodes * num_services)
+                "system_configs_os": MultiBinary(num_nodes * num_os),
+                "active_alerts": MultiBinary(num_nodes*10),
+                "firewall_status": MultiBinary(num_nodes * num_services)}
 
-        } )
         }
-
 
     def _get_defender_obs(self) -> dict:
         """
@@ -94,7 +91,6 @@ class PenGymMultiEnv(MultiAgentEnv):
         }
 
         return defender_obs
-
     def reset(self,*,seed=None,options=None)-> Tuple[MultiAgentDict, MultiAgentDict]:
         obs,info = self.pengym_env.reset(seed=seed,options=options)
 
@@ -208,56 +204,3 @@ class PenGymMultiEnv(MultiAgentEnv):
 def close(self):
     self.pengym_env.close()
     ray.shutdown()
-
-
-############################# TRAINING PROCEDURES ##################################  
-
-temp_env= PenGymMultiEnv({})
-obs_space_attacker = temp_env.observation_Space["attacker"]
-act_space_attacker = temp_env.action_Space["attacker"]
-obs_space_defender = temp_env.observation_Space["defender"]
-act_space_defender = temp_env.action_Space["defender"]
-
-def config_IPPO():
-    ray.init(ignore_reinit_error=True)
-    tune.register_env("PenGymMultiEnv-v0", lambda config: PenGymMultiEnv(config))
-
-    config = (
-        PPOConfig()
-        .environment("PenGymMultiEnv-v0")
-        .framework("torch") # Use PyTorch
-        .multi_agent(
-            policies= {
-                "attacker_policy": PolicySpec(
-                    observation_space=obs_space_attacker,
-                    action_space=act_space_attacker,
-                    config={}
-                ),
-                "defender_policy": PolicySpec(
-                    observation_space=obs_space_defender,
-                    action_space=act_space_defender,
-                    config={}
-                )
-            },
-            # Map the agent string ID from the environment to the specific policy name
-            policy_mapping_fn = lambda agent_id, episode: 
-                "attacker_policy" if agent_id == "attacker" else "defender_policy",
-            )
-        .training(#hyper parameters should be tuned
-            lr=3e-4,
-            clip_param=0.2,
-            gamma=0.99,
-            lambda_=0.95,  
-            use_gae=True,
-            train_batch_size=4000,
-            sgd_minibatch_size=128,
-            num_sgd_iter=10)
-        .rollouts(num_rollout_workers=1) # distributed training
-        )
-    return config
-    
-
-def execute_training(self):
-    algo = self.config_IPPO().build()
-    while(True):
-        pass
