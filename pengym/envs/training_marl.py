@@ -1,4 +1,4 @@
-from marl_environment import PenGymMultiEnv
+from pengym.envs.marl_environment import PenGymMultiEnv
 import ray
 from ray import tune
 from ray.rllib.algorithms.ppo import PPOConfig
@@ -54,7 +54,10 @@ class MappoArchitecture(TorchModelV2, nn.Module):
             nn.Linear(global_dim, 512),
             nn.LayerNorm(512),
             nn.LeakyReLU(0.1),
-            nn.Linear(512, 256),
+            nn.Linear(512, 512),
+            nn.LayerNorm(512),
+            nn.LeakyReLU(0.1),
+            nn.Linear(512,256),
             nn.LayerNorm(256),
             nn.LeakyReLU(0.1),
             nn.Linear(256, 1) #Outputs standard scalar baseline estimate
@@ -108,93 +111,126 @@ class MappoArchitecture(TorchModelV2, nn.Module):
         return self._value_out
     
 
-def config_MAPPO():
+def config_MAPPO()->PPOConfig:
 
     ModelCatalog.register_custom_model("mappo_model", MappoArchitecture)
     ray.init(ignore_reinit_error=True)
     tune.register_env("PenGymMultiEnv-v0", lambda config: PenGymMultiEnv(config))
 
-    config = (
-            PPOConfig()
-            .environment("PenGymMultiEnv-v0")
-            .framework("torch") # Use PyTorch
-            .multi_agent(
-                policies= {
-                    "attacker_policy": PolicySpec(
-                        observation_space=obs_space_attacker,
-                        action_space=act_space_attacker,
-                        config={}
-                    ),
-                    "defender_policy": PolicySpec(
-                        observation_space=obs_space_defender,
-                        action_space=act_space_defender,
-                        config={}
-                    )
-                },
-                # Map the agent string ID from the environment to the specific policy name
-                policy_mapping_fn = lambda agent_id, episode: 
-                    "attacker_policy" if agent_id == "attacker" else "defender_policy",
-                )
-            .training(#hyper parameters should be tuned
-                lr=3e-4,
-                clip_param=0.2,
-                gamma=0.99,
-                lambda_=0.95,  
-                use_gae=True,
-                train_batch_size=4000,
-                sgd_minibatch_size=128,
-                model= {
-                    "custom_model": "mappo_model",
-                    "custom_model_config": {
-                        "global_dim": GLOBAL_STATE_DIM
-                    }
-                })
-            .rollouts(num_rollout_workers=2)
-    )
-    
+    config = PPOConfig()
 
-def config_IPPO():
-    ray.init(ignore_reinit_error=True)
-    tune.register_env("PenGymMultiEnv-v0", lambda config: PenGymMultiEnv(config))
-
-    config = (
-        PPOConfig()
-        .environment("PenGymMultiEnv-v0")
-        .framework("torch") # Use PyTorch
-        .multi_agent(
-            policies= {
-                "attacker_policy": PolicySpec(
-                    observation_space=obs_space_attacker,
-                    action_space=act_space_attacker,
-                    config={}
-                ),
-                "defender_policy": PolicySpec(
-                    observation_space=obs_space_defender,
-                    action_space=act_space_defender,
-                    config={}
-                )
-            },
-            # Map the agent string ID from the environment to the specific policy name
-            policy_mapping_fn = lambda agent_id, episode: 
-                "attacker_policy" if agent_id == "attacker" else "defender_policy",
+    config.environment("PenGymMultiEnv-v0")
+    config.framework("torch") # Use PyTorch
+    config.multi_agent(
+        policies= {
+            "attacker_policy": PolicySpec(
+                observation_space=obs_space_attacker,
+                action_space=act_space_attacker,
+                config={}
+            ),
+            "defender_policy": PolicySpec(
+                observation_space=obs_space_defender,
+                action_space=act_space_defender,
+                config={}
             )
-        .training(#hyper parameters should be tuned
-            lr=1e-4,
-            clip_param=0.2,
-            gamma=0.99,
-            lambda_=0.95,  
-            use_gae=True,
-            sgd_minibatch_size=128,
-            num_sgd_iter=10,)
-        .rollouts(num_rollout_workers=1) # distributed training
+        },
+        # Map the agent string ID from the environment to the specific policy name
+        policy_mapping_fn = lambda agent_id, episode: 
+            "attacker_policy" if agent_id == "attacker" else "defender_policy",
         )
+    config.training(#hyper parameters should be tuned
+        lr=1e-4,
+        clip_param=0.2,
+        gamma=0.99,
+        lambda_=0.95,  
+        use_gae=True,
+        train_batch_size=4000,
+        sgd_minibatch_size=128,
+        model= {
+            "custom_model": "mappo_model",
+            "custom_model_config": {
+                "global_dim": GLOBAL_STATE_DIM
+            }
+        })
+    config.rollouts(num_rollout_workers=1)
+    
     return config
     
 
-def execute_training(self, type):
-    if type=="mappo":
-        algo = self.config_IPPO().build()
-    elif type=="ippo":
-        algo = self.config_MAPPO().build()
+def config_IPPO()->PPOConfig:
+    ray.init(ignore_reinit_error=True)
+    tune.register_env("PenGymMultiEnv-v0", lambda config: PenGymMultiEnv(config))
+    
+    config = PPOConfig()
+    config.environment("PenGymMultiEnv-v0")
+    config.framework("torch") # Use PyTorch
+    config.multi_agent(
+        policies= {
+            "attacker_policy": PolicySpec(
+                observation_space=obs_space_attacker,
+                action_space=act_space_attacker,
+                config={}
+            ),
+            "defender_policy": PolicySpec(
+                observation_space=obs_space_defender,
+                action_space=act_space_defender,
+                config={}
+            )
+        },
+        # Map the agent string ID from the environment to the specific policy name
+        policy_mapping_fn = lambda agent_id, episode: 
+            "attacker_policy" if agent_id == "attacker" else "defender_policy",
+        )
+    config.training(#hyper parameters should be tuned
+        lr=1e-4,
+        clip_param=0.2,
+        gamma=0.99,
+        lambda_=0.95,  
+        use_gae=True,
+        sgd_minibatch_size=128,
+        num_sgd_iter=10,)
+    config.rollouts(num_rollout_workers=1) # distributed training
+        
+    return config
+    
+def execute_training(algo_type, training_iterations=4000):
+    """
+    Initializes and executes the MARL training loop using RLlib.
+    """
+    config:PPOConfig
+    if algo_type == "mappo":
+        print("[*] Compiling MAPPO Configuration (CTDE)...")
+        config = config_MAPPO()
+        
+    elif algo_type == "ippo":
+        print("[*] Compiling IPPO Configuration (Decentralized)...")
+        config = config_IPPO()
+    else:
+        raise ValueError("Algorithm type must be 'Mappo' or 'Ippo'")
+
+    print(f"[*] Building {algo_type.upper()} algorithm graph...")
+    algo = config.build()
+
+    print(f"[*] Starting {algo_type.upper()} training loop for {training_iterations} iterations...")
+    
+    #The Execution Loop
+    for i in range(training_iterations):
+
+        result = algo.train()
+        
+        policy_rewards = result.get('policy_reward_mean', {})
+        reward_attacker = policy_rewards.get('attacker_policy', 0.0)
+        reward_defender = policy_rewards.get('defender_policy', 0.0)
+        
+        # Print a formatted string to monitor the zero-sum dynamics
+        print(f"Iteration {i+1} | "
+              f"Attacker Reward: {reward_attacker} | "
+              f"Defender Reward: {reward_defender} | "
+              f"Total Env Steps: {result['num_env_steps_sampled_workspace']}")
+        
+        #Checkpoint saving (Crucial for later inference/evaluation)
+        if (i + 1) % 100 == 0:
+            checkpoint_dir = algo.save(checkpoint_dir=f"./checkpoints/{algo_type}_{i+1}")
+            print(f"[*] Checkpoint saved at: {checkpoint_dir}")
 
         

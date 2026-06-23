@@ -12,44 +12,13 @@ import getopt
 import pengym.utilities as utils
 import pengym.training as training
 from pengym.storyboard import Storyboard
+import pengym.envs.training_marl as training_marl
 
 storyboard = Storyboard()
 
 #############################################################################
 # Constants
 #############################################################################
-
-# Action names/targets
-SUBNET_SCAN = 'SubnetScan'
-OS_SCAN = 'OSScan'
-SERVICE_SCAN = 'ServiceScan'
-EXPLOIT_SSH = 'Exploit_Ssh'
-EXPLOIT_FTP = 'Exploit_Ftp'
-EXPLOIT_SAMBA = 'Exploit_Samba'
-EXPLOIT_SMTP = 'Exploit_Smtp'
-EXPLOIT_HTTP = 'Exploit_Http'
-PROCESS_SCAN = 'ProcessScan'
-PRIVI_ESCA_TOMCAT = 'PrivilegeEscalation_Tomcat'
-PRIVI_ESCA_PROFTPD = 'PrivilegeEscalation_Proftpd'
-PRIVI_ESCA_CRON = 'PrivilegeEscalation_Cron'
-
-
-
-RED_ACTION_NAMES = {SUBNET_SCAN: "subnet_scan", OS_SCAN: "os_scan", SERVICE_SCAN: "service_scan", PROCESS_SCAN: "process_scan",
-                EXPLOIT_SSH: "e_ssh",  EXPLOIT_FTP: "e_ftp", EXPLOIT_SAMBA: "e_samba", EXPLOIT_SMTP: "e_smtp", EXPLOIT_HTTP: "e_http", 
-                PRIVI_ESCA_TOMCAT: "pe_tomcat", PRIVI_ESCA_PROFTPD: "pe_daclsvc", PRIVI_ESCA_CRON: "pe_schtask"}
-
-BLUE_ACTION_NAMES = {
-    BLOCK_SSH: "block_ssh", BLOCK_FTP:"block_ftp", BLOCK_HTTP:"block_http", BLOCK_SAMBA:"block_samba",BLOCK_SMTP:"block_smtp",ISOLATE_HOST:"isolate_host",CHECK_ALERT:"check_alert"
-}
-
-HOST1 = 'host1'
-HOST2 = 'host2'
-HOST3 = 'host3'
-
-
-
-ACTION_TARGETS = {HOST1: (1, 0), HOST2: (2, 0), HOST3: (3, 0)}
 
 # Agent types
 AGENT_TYPE_RANDOM = "random"
@@ -74,74 +43,6 @@ def select_action(action_space, action_name, action_target):
             return action
 
 #############################################################################
-# Run pentesting with a random agent in the environment 'env'
-def run_random_agent(env):
-
-    # Initialize variables
-    done = False # Indicate that execution is done
-    truncated = False # Indicate that execution is truncated
-    step_count = 0 # Count the number of execution steps
-
-    # Loop while the experiment is not finished (pentesting goal not reached)
-    # and not truncated (aborted because of exceeding maximum number of steps)
-    while not done and not truncated:
-
-        # Sample a random action from the action space of this environment
-        action = env.action_space.sample()
-        action = action.item()
-
-        # Increment step count and execute action
-        step_count = step_count + 1
-        print(f"- Step {step_count}: {env.action_space.get_action(action)}")
-        observation, reward, done, truncated, info = env.step(action)
-        if RENDER_OBS_STATE:
-            env.render() # render most recent observation
-            env.render_state() # render most recent state
-
-        # Conditional exit (for debugging purposes)
-        if step_count >= MAX_STEPS:
-            logging.warning(f"Abort execution after {step_count} steps")
-            break
-
-    return done, truncated, step_count
-
-#############################################################################
-# Run pentesting with a deterministic agent in the environment 'env'
-def run_deterministic_agent(env, deterministic_path):
-
-    # Initialize variables
-    done = False # Indicate that execution is done
-    truncated = False # Indicate that execution is truncated
-    step_count = 0 # Count the number of execution steps
-
-    # Loop while the experiment is not finished (pentesting goal not reached)
-    # and not truncated (aborted because of exceeding maximum number of steps)
-    while not done and not truncated:
-        # Exit if there are no more steps in the deterministic path
-        if step_count >= len(deterministic_path):
-            break
-
-        # Retrieve the next action to be executed
-        action_tuple = deterministic_path[step_count]
-        action = select_action(env.action_space, RED_ACTION_NAMES[action_tuple[1]], ACTION_TARGETS[action_tuple[0]])
-
-        # Increment step count and execute action
-        step_count = step_count + 1
-        
-        print(f"- Step {step_count}: {action}") 
-        observation, reward, done, truncated, info = env.step(action)
-
-        if RENDER_OBS_STATE:
-            env.render() # render most recent observation
-            env.render_state() # render most recent state
-
-        # Conditional exit (for debugging purposes)
-        if step_count >= MAX_STEPS:
-            logging.warning(f"Abort execution after {step_count} steps")
-            break
-
-    return done, truncated, step_count
-
 # Create PenGym environment using scenario 'scenario_name'
 def create_pengym_environment(scenario_name):
     env = pengym.create_environment(scenario_name)
@@ -246,7 +147,7 @@ def main(args):
     scenario_path = utils.replace_file_path(utils.config_info, storyboard.SCENARIO_FILE)
     print(f"* Create environment using custom scenario from '{scenario_path}'...")
     env = create_pengym_environment("tiny")
-    
+    """
     avg_reward = []
     for number in range(5):  #five agents is the number considered in the experiment
         if utils.ENABLE_PENGYM:
@@ -274,46 +175,27 @@ def main(args):
         print(f"* Starting to train the agent {number+1} on the custom cyber range")
         agent = training.RedAgent(env,learning_rate=0.01, initial_epsilon=1, epsilon_decay=1 / (N_EPISODES / 2), final_epsilon=0.05, discount_factor=0.99)
         avg_reward.append(agent.training_agent_buffer(300,200,32))
-        if utils.ENABLE_PENGYM:
+
+        print("* Clean up MSF RPC client...")
+        utils.cleanup_msfrpc_client()
+        print("* Restore the to intial state of the firewalls for all hosts...")
+        utils.save_restore_firewall_rules_all_hosts(flag=storyboard.RESTORE)
+        avg_reward = np.mean(avg_reward,0)
+        training.plot_rewards(avg_reward,1)
+    """
+    if utils.ENABLE_PENGYM:
+            print(f"* Starting MARL training on the custom cyber range")
+
+            
+            # Execute the multi-agent training
+            training_marl.execute_training(algo_type="mappo", training_iterations=300)
+            
             print("* Clean up MSF RPC client...")
             utils.cleanup_msfrpc_client()
             print("* Restore the to intial state of the firewalls for all hosts...")
             utils.save_restore_firewall_rules_all_hosts(flag=storyboard.RESTORE)
-    avg_reward = np.mean(avg_reward,0)
-    training.plot_rewards(avg_reward,1)
-    # Run experiment using a random agent
-'''if agent_type == AGENT_TYPE_RANDOM:
-        print("* Perform pentesting using a RANDOM agent...")
-        done, truncated, step_count = run_random_agent(env)
+            # ...
 
-    # Run experiment using a deterministic agent
-    elif agent_type == AGENT_TYPE_DETERMINISTIC:
-
-
-        # Pentesting path for scenario "tiny" assuming need for service/process discovery
-        deterministic_path = [ (HOST1, OS_SCAN), (HOST1, SERVICE_SCAN), (HOST1, EXPLOIT_SSH), (HOST1, SUBNET_SCAN),
-                 (HOST3, OS_SCAN), (HOST3, SERVICE_SCAN), (HOST3, EXPLOIT_SSH), (HOST3, PROCESS_SCAN), (HOST3, PRIVI_ESCA_TOMCAT),
-                 (HOST2, OS_SCAN), (HOST2, SERVICE_SCAN), (HOST2, EXPLOIT_SSH), (HOST2, PROCESS_SCAN), (HOST2, PRIVI_ESCA_TOMCAT) ]
-
-        print("* Execute pentesting using a DETERMINISTIC agent...")
-        done, truncated, step_count = run_deterministic_agent(env, deterministic_path)
-
-    else:
-        logging.error(f"Unrecognized agent type: '{agent_type}'")
-        usage()
-        sys.exit(1)
-
-    # Print execution status
-    if done:
-        # All the goals in the scenario file were reached
-        print(f"* NORMAL execution: {step_count} steps")
-    elif truncated:
-        # Execution was truncated before reaching all the goals (for random agents, etc.)
-        print(f"* TRUNCATED execution: {step_count} steps")
-    else:
-        # Execution finished before reaching all the goals (for deterministic agents)
-        print(f"* INCOMPLETE execution: {step_count} steps")
-'''
 
 #############################################################################
 # Run program

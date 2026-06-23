@@ -1,19 +1,18 @@
 import gymnasium as gym
 from gymnasium.utils import seeding
 from gymnasium.spaces import Discrete,Space, MultiBinary
-from environment import PenGymEnv
+from pengym.envs.environment import PenGymEnv
 import random
 import numpy as np
 import ray
-from ray import tune
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from ray.rllib.utils.typing import MultiAgentDict
 from ray.rllib.policy.policy import PolicySpec
 from typing import Tuple,Dict
-import utilities as utils
-from storyboard import Storyboard
-from blue_vector import BlueActionExecutor
+import pengym.utilities as utils
+from pengym.storyboard import Storyboard
+from pengym.envs.blue_vector import BlueActionExecutor
 from typing import cast
 
 class PenGymMultiEnv(MultiAgentEnv):
