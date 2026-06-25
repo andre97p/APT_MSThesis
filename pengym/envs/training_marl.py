@@ -228,8 +228,8 @@ def execute_training(algo_type, training_iterations=4000):
         print(f"Iteration {i+1} | "
               f"Attacker Reward: {reward_attacker} | "
               f"Defender Reward: {reward_defender} | "
-              f"Total Env Steps: {result['num_env_steps_sampled']}")
-        avg_steps.append(result['num_env_steps_sampled'])
+              f"Total Env Steps: {result.get('num_env_steps_sampled', 0)}")
+        avg_steps.append(result.get('num_env_steps_sampled', 0))
         #Checkpoint saving (Crucial for later inference/evaluation)
         if (i + 1) % 100 == 0:
             checkpoint_dir = algo.save(checkpoint_dir=f"./checkpoints/{algo_type}_{i+1}")
