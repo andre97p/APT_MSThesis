@@ -121,6 +121,10 @@ def config_MAPPO()->PPOConfig:
 
     config.environment("PenGymMultiEnv-v0")
     config.framework("torch") # Use PyTorch
+    config.api_stack(
+        enable_rl_module_and_learner=False,
+        enable_env_runner_and_connector_v2=False
+    )
     config.multi_agent(
         policies= {
             "attacker_policy": PolicySpec(
@@ -132,28 +136,24 @@ def config_MAPPO()->PPOConfig:
                 observation_space=obs_space_defender,
                 action_space=act_space_defender,
                 config={}
-            )
-        },
+            )},
+        policy_mapping_fn = lambda agent_id, episode, **kwargs:
+            "attacker_policy" if agent_id == "attacker" else "defender_policy")
         # Map the agent string ID from the environment to the specific policy name
-        policy_mapping_fn = lambda agent_id, episode: 
-            "attacker_policy" if agent_id == "attacker" else "defender_policy",
-        )
-    config.training(#hyper parameters should be tuned
+    config.training(
+        #hyper parameters should be tuned
         lr=1e-4,
         clip_param=0.2,
         gamma=0.99,
         lambda_=0.95,  
         use_gae=True,
-        train_batch_size=4000,
-        sgd_minibatch_size=128,
         model= {
             "custom_model": "mappo_model",
             "custom_model_config": {
                 "global_dim": GLOBAL_STATE_DIM
             }
         })
-    config.rollouts(num_rollout_workers=1)
-    
+    config.env_runners(num_env_runners=1)
     return config
     
 
@@ -162,6 +162,10 @@ def config_IPPO()->PPOConfig:
     tune.register_env("PenGymMultiEnv-v0", lambda config: PenGymMultiEnv(config))
     
     config = PPOConfig()
+    config.api_stack(
+        enable_rl_module_and_learner=False,
+        enable_env_runner_and_connector_v2=False
+    )
     config.environment("PenGymMultiEnv-v0")
     config.framework("torch") # Use PyTorch
     config.multi_agent(
@@ -175,28 +179,27 @@ def config_IPPO()->PPOConfig:
                 observation_space=obs_space_defender,
                 action_space=act_space_defender,
                 config={}
-            )
-        },
+            )},
+        policy_mapping_fn = lambda agent_id, episode, **kwargs:
+            "attacker_policy" if agent_id == "attacker" else "defender_policy")
         # Map the agent string ID from the environment to the specific policy name
-        policy_mapping_fn = lambda agent_id, episode: 
-            "attacker_policy" if agent_id == "attacker" else "defender_policy",
-        )
-    config.training(#hyper parameters should be tuned
+                        
+    config.training(
         lr=1e-4,
         clip_param=0.2,
         gamma=0.99,
         lambda_=0.95,  
         use_gae=True,
-        sgd_minibatch_size=128,
         num_sgd_iter=10,)
-    config.rollouts(num_rollout_workers=1) # distributed training
-        
+    config.env_runners(num_env_runners=1)
+
     return config
     
 def execute_training(algo_type, training_iterations=4000):
     """
     Initializes and executes the MARL training loop using RLlib.
     """
+    avg_steps=[]
     config:PPOConfig
     if algo_type == "mappo":
         print("[*] Compiling MAPPO Configuration (CTDE)...")
@@ -209,13 +212,12 @@ def execute_training(algo_type, training_iterations=4000):
         raise ValueError("Algorithm type must be 'Mappo' or 'Ippo'")
 
     print(f"[*] Building {algo_type.upper()} algorithm graph...")
-    algo = config.build()
+    algo = config.build_algo()
 
     print(f"[*] Starting {algo_type.upper()} training loop for {training_iterations} iterations...")
     
     #The Execution Loop
     for i in range(training_iterations):
-
         result = algo.train()
         
         policy_rewards = result.get('policy_reward_mean', {})
@@ -226,8 +228,8 @@ def execute_training(algo_type, training_iterations=4000):
         print(f"Iteration {i+1} | "
               f"Attacker Reward: {reward_attacker} | "
               f"Defender Reward: {reward_defender} | "
-              f"Total Env Steps: {result['num_env_steps_sampled_workspace']}")
-        
+              f"Total Env Steps: {result['num_env_steps_sampled']}")
+        avg_steps.append(result['num_env_steps_sampled'])
         #Checkpoint saving (Crucial for later inference/evaluation)
         if (i + 1) % 100 == 0:
             checkpoint_dir = algo.save(checkpoint_dir=f"./checkpoints/{algo_type}_{i+1}")

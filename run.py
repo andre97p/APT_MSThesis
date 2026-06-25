@@ -188,7 +188,7 @@ def main(args):
 
             
             # Execute the multi-agent training
-            training_marl.execute_training(algo_type="mappo", training_iterations=300)
+            training_marl.execute_training(algo_type="ippo", training_iterations=300)
             
             print("* Clean up MSF RPC client...")
             utils.cleanup_msfrpc_client()

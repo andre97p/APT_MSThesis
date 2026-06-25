@@ -25,8 +25,8 @@ global ENABLE_PENGYM
 global ENABLE_NASIM
 global PENGYM_ERROR
 global alerts
-isolated_hosts={}
-current_sid=2000000
+global isolated_hosts
+global current_sid
 
 # Declare constant values from pengym board
 storyboard = Storyboard()
@@ -39,7 +39,9 @@ msfrpc_client = None
 nmap_scanner = None
 service_port_map = None
 current_state = None
-
+isolated_hosts={}
+alerts=[]
+current_sid=2000000
 # Default values regarding default PenGym/NASim execution
 ENABLE_PENGYM = True
 PENGYM_ERROR = False
