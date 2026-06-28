@@ -713,40 +713,48 @@ def replace_file_path(database, file_name):
             .replace(storyboard.RANGE_ID_PATTERN, str(database[storyboard.RANGE_ID]))\
             .replace(storyboard.CYBER_RANGE_DIR_PATTERN, database[storyboard.CYBER_RANGE_DIR])
 
-def check_status(alert_log_path="/var/log/snort/alerts", tail_lines=100):
+def check_status(alert_log_path="/var/log/snort/snort.alert", tail_lines=100):
     """
-    Ingests recent telemetry from the Snort alert to assess the presence of 
-    malicious activities. Parses the standard log format to populate the Blue Team agent's 
-    observation vector.
+    Ingests recent telemetry from the Snort alert log to assess the presence of
+    malicious activities. Parses the fast-alert format to populate the Blue Team
+    agent's observation vector.
+
+    Snort fast alert line format:
+      MM/DD-HH:MM:SS.us  [**] [gid:sid:rev] message [**] [Classification: ...] [Priority: N] {PROTO} src_ip:port -> dst_ip:port
+    Returns True when new alerts are detected (action succeeded), False otherwise.
     """
-    # Extract the most recent alert vectors from the Snort logging facility
     command = f"sudo tail -n {tail_lines} {alert_log_path}"
-    
+
     try:
-        raw_telemetry = subprocess.check_output(command, shell=True, text=True)
+        raw_telemetry = subprocess.check_output(
+            command, shell=True, stderr=subprocess.DEVNULL,
+            encoding='latin-1' 
+        )
     except subprocess.CalledProcessError:
-        return {"error": "Failed to poll Snort alert facility."}
-        
+        return False
+
     parsed_alerts = []
-    
-    # Heuristic regex to parse the standard Snort fast alert taxonomy:
-    alert_pattern = re.compile(r'\[\*\*\] \[\d+:\d+:\d+\] (.*?) \[\*\*\] .*? \{(.*?)\} ([\d\.]+) -> ([\d\.]+)')
-    
+
+    # Handles optional port numbers after IPs (src_ip:port -> dst_ip:port)
+    alert_pattern = re.compile(
+        r'\[\*\*\]\s+\[\d+:\d+:\d+\]\s+(.+?)\s+\[\*\*\]'
+        r'.*?\{(\w+)\}\s+([\d\.]+)(?::\d+)?\s+->\s+([\d\.]+)(?::\d+)?'
+    )
+
     for line in raw_telemetry.split('\n'):
         match = alert_pattern.search(line)
         if match:
-            alert_node = {
+            parsed_alerts.append({
                 "signature_msg": match.group(1).strip(),
-                "protocol": match.group(2).strip(),
-                "src_ip": match.group(3).strip(),
-                "dst_ip": match.group(4).strip()
-            }
-            
-            parsed_alerts.append(alert_node)
+                "protocol":      match.group(2).strip().lower(),
+                "src_ip":        match.group(3).strip(),
+                "dst_ip":        match.group(4).strip(),
+            })
+
     global alerts
-    alerts= parsed_alerts        
-    # Returns the structured alert array to inform the reinforcement learning policy
-    return parsed_alerts==[]
+    alerts = parsed_alerts
+    # True → alerts detected (defender earns reward for successful monitoring)
+    return len(parsed_alerts) > 0
 
 #clean alert status after each epoch
 def clean_alertList():
@@ -766,7 +774,7 @@ def do_isolate_host(host_ip,hypervisor_target="root@192.168.1.1"):
     else:
         target_interface= _get_interface_guest(host_ip)
         if not target_interface:
-            execute_script(f"logger -t COMP_PENGYM_ERR: Could not resolve tap interface for address {host_ip}'")
+            execute_script(f"logger -t COMP_PENGYM_ERR 'Could not resolve tap interface for address {host_ip}'")
             return False
         try:
     # Issue the virsh domif-setlink command to transition the virtual NIC to a DOWN state

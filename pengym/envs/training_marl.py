@@ -119,7 +119,10 @@ def config_MAPPO()->PPOConfig:
 
     config = PPOConfig()
 
-    config.environment("PenGymMultiEnv-v0")
+    config.environment("PenGymMultiEnv-v0", env_config={
+        "enable_nasim": True,
+        "enable_pengym": False,
+    })
     config.framework("torch") # Use PyTorch
     config.api_stack(
         enable_rl_module_and_learner=False,
@@ -145,7 +148,7 @@ def config_MAPPO()->PPOConfig:
         lr=1e-4,
         clip_param=0.2,
         gamma=0.99,
-        lambda_=0.95,  
+        lambda_=0.95,
         use_gae=True,
         model= {
             "custom_model": "mappo_model",
@@ -166,7 +169,10 @@ def config_IPPO()->PPOConfig:
         enable_rl_module_and_learner=False,
         enable_env_runner_and_connector_v2=False
     )
-    config.environment("PenGymMultiEnv-v0")
+    config.environment("PenGymMultiEnv-v0", env_config={
+        "enable_nasim": True,
+        "enable_pengym": False,
+    })
     config.framework("torch") # Use PyTorch
     config.multi_agent(
         policies= {

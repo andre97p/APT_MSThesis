@@ -25,6 +25,13 @@ class PenGymMultiEnv(MultiAgentEnv):
     def __init__(self, environment):
         super().__init__()
 
+        # Apply execution mode flags from env_config so Ray workers use the correct mode.
+        # Workers are separate processes and do not inherit main-process global state.
+        if "enable_pengym" in environment:
+            utils.ENABLE_PENGYM = environment["enable_pengym"]
+        if "enable_nasim" in environment:
+            utils.ENABLE_NASIM = environment["enable_nasim"]
+
         scenario = environment.get("scenario_name", "medium-multi-site")
         scenario_obj = make_benchmark_scenario(scenario)
         fully_obs = environment.get("fully_obs", False)
@@ -82,9 +89,18 @@ class PenGymMultiEnv(MultiAgentEnv):
 
         # One bit per alert slot (up to 10 per node)
         active_alerts = np.zeros(num_nodes * 10, dtype=np.int8)
-        alert_list = utils.alerts if hasattr(utils, 'alerts') else []
-        for j in range(min(len(alert_list), num_nodes * 10)):
-            active_alerts[j] = 1
+        if utils.ENABLE_PENGYM:
+            # Real mode: populate from live Snort alert list
+            alert_list = utils.alerts if hasattr(utils, 'alerts') else []
+            for j in range(min(len(alert_list), num_nodes * 10)):
+                active_alerts[j] = 1
+        else:
+            # Simulation mode: derive alerts from NASim state.
+            # A compromised host is treated as a confirmed intrusion alert so the
+            # defender receives a non-zero observation signal and can learn to respond.
+            for i, host_addr in enumerate(self.pengym_env.network.address_space):
+                if self.pengym_env.current_state.host_compromised(host_addr):
+                    active_alerts[i * 10] = 1  # one alert bit per compromised host
 
         # Mark all service slots of isolated hosts as blocked
         firewall_status = np.zeros(num_nodes * num_services, dtype=np.int8)
@@ -104,12 +120,12 @@ class PenGymMultiEnv(MultiAgentEnv):
     def reset(self, *, seed=None, options=None) -> Tuple[MultiAgentDict, MultiAgentDict]:
         obs, info = self.pengym_env.reset(seed=seed, options=options)
 
-        restore_alert = utils.clean_alertList()
-        restore_isolated = utils.restore_isolated()
-        restore_connections = utils.unlock_connections()
-        print(f"Cleaning alerts list gives {restore_alert} result")
-        print(f"Restoring shutted down connections gives {restore_isolated} result")
-        print(f"Restoring connection filters gives {restore_connections} result")
+        utils.clean_alertList()
+        if utils.ENABLE_PENGYM:
+            restore_isolated = utils.restore_isolated()
+            restore_connections = utils.unlock_connections()
+            print(f"Restoring shutted down connections gives {restore_isolated} result")
+            print(f"Restoring connection filters gives {restore_connections} result")
 
         self.agents = self.possible_agents[:]
         self._attacker_obs = obs  # persist so defender-turn step can return it
@@ -151,7 +167,7 @@ class PenGymMultiEnv(MultiAgentEnv):
 
         if self.current_agent == "attacker":
             print("Red Agent Turn")
-            obs, attacker_reward, terminated, truncated, attacker_info = self.pengym_env.step(action)
+            obs, attacker_reward, terminated, truncated, attacker_info = self.pengym_env.step(int(action))
 
             self._attacker_obs = obs  # persist so defender-turn step can return it
 
@@ -160,7 +176,7 @@ class PenGymMultiEnv(MultiAgentEnv):
 
             self.terminations = {a: terminated for a in self.agents}
             self.truncations = {a: truncated for a in self.agents}
-            infos["attacker"] = attacker_info
+            infos[opponent] = attacker_info
 
             next_obs = {opponent: self._get_defender_obs()}
 
@@ -186,7 +202,7 @@ class PenGymMultiEnv(MultiAgentEnv):
             rewards["defender"] = actual_reward
             rewards["attacker"] = -actual_reward
 
-            infos["defender"] = {
+            infos[opponent] = {
                 "executed_action": action_type,
                 "target_ip": target_ip,
                 "success": rewards

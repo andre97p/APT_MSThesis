@@ -36,7 +36,7 @@ class PenGymNetwork(Network):
         # Catch actions that did not succeed in the superclass function
         # PENGYM_ERROR is used to check if this error comes from PenGym or not; consequently we do not print a failure
         # that occured in the super function if the error has already been printed in a PenGym function
-        if not obs.success and not utils.PENGYM_ERROR:
+        if not obs.success and not utils.PENGYM_ERROR and utils.ENABLE_PENGYM:
             utils.print_failure(action, obs, storyboard.TAG_NASIM_PENGYM, end-start)
 
         return next_state, obs

@@ -8,34 +8,34 @@ class BlueActionExecutor:
     def __init__(self, config):
         self.config = config
         self.result: int
-        self.action_reward= {
-            "CHECK_STATUS":3,
-            "BLOCK_CONNECTIONS":6,
-            "ISOLATE_HOST":30,
-            "DO_NOTHING":0
-
-
+        self.action_reward = {
+            "check_status": 3,
+            "block_connections": 6,
+            "isolate_host": 30,
+            "do_nothing": 0,
         }
-        self.action_cost= {
-            "CHECK_STATUS":1,
-            "BLOCK_CONNECTIONS":3,
-            "ISOLATE_HOST":20,
-            "DO_NOTHING":1
-
-            
+        self.action_cost = {
+            "check_status": 1,
+            "block_connections": 3,
+            "isolate_host": 20,
+            "do_nothing": 1,
         }
 
     def execute_action(self, action_type, target_host_ip, timestep, kwargs={}):
         """Dispatcher for Blue Agent actions"""
-        result = 0
-        if action_type == Storyboard.CHECK_STATUS:
-            result = utils.check_status()
-        elif action_type == Storyboard.BLOCK_CONNECTIONS:
-            result = utils.block_connections(target_host_ip)
-        elif action_type == Storyboard.ISOLATE_HOST:
-            result = utils.do_isolate_host(target_host_ip)
-        elif action_type == Storyboard.DO_NOTHING:
-            result = utils.do_nothing()
+        if utils.ENABLE_PENGYM:
+            result = False
+            if action_type == Storyboard.CHECK_STATUS:
+                result = utils.check_status()
+            elif action_type == Storyboard.BLOCK_CONNECTIONS:
+                result = utils.block_connections(target_host_ip) if target_host_ip else False
+            elif action_type == Storyboard.ISOLATE_HOST:
+                result = utils.do_isolate_host(target_host_ip) if target_host_ip else False
+            elif action_type == Storyboard.DO_NOTHING:
+                result = utils.do_nothing()
+        else:
+            result = True
+        print(f"Current '{action_type}' operation executed ... Actual Result: {result}")
         reward = self.compute_reward(action_type, result, timestep)
         return int(reward)
 

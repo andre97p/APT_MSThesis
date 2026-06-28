@@ -3,6 +3,7 @@
 from nasim.envs import NASimEnv
 from .network import PenGymNetwork
 from .state import PenGymState
+import pengym.utilities as utils
 
 class PenGymEnv(NASimEnv):
     """A simulated environment for pentesting. The PenGym environment class is derived from the NASim environment one.
@@ -22,7 +23,9 @@ class PenGymEnv(NASimEnv):
         """
 
         # Call the superclass __init__ function
-        super().__init__(scenario, fully_obs, flat_actions, flat_obs) 
+        super().__init__(scenario, fully_obs, flat_actions, flat_obs)
+        # Publish scenario to the global utils module so host_vector and network can access it
+        utils.scenario = self.scenario
         # Initialize a PenGymNetwork object from the scenario
         self.network = PenGymNetwork(scenario)
 

@@ -155,7 +155,7 @@ class Storyboard():
     INTERPRETER = 'interpreter'
     BASH = 'bash'
     AFTER_CLONE = 'after_clone'
-    EXECUTE_TIME = 'execute_time'
+    EXECUTE_TIME = 'do'
     CURRENT_SID='current_sid'
     BLOCK_CONNECTIONS= 'block_connections'
     
