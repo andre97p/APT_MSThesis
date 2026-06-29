@@ -23,18 +23,15 @@ class BlueActionExecutor:
 
     def execute_action(self, action_type, target_host_ip, timestep, kwargs={}):
         """Dispatcher for Blue Agent actions"""
-        if utils.ENABLE_PENGYM:
-            result = False
-            if action_type == Storyboard.CHECK_STATUS:
-                result = utils.check_status()
-            elif action_type == Storyboard.BLOCK_CONNECTIONS:
-                result = utils.block_connections(target_host_ip) if target_host_ip else False
-            elif action_type == Storyboard.ISOLATE_HOST:
-                result = utils.do_isolate_host(target_host_ip) if target_host_ip else False
-            elif action_type == Storyboard.DO_NOTHING:
-                result = utils.do_nothing()
-        else:
-            result = True
+        result = False
+        if action_type == Storyboard.CHECK_STATUS:
+            result = utils.check_status()
+        elif action_type == Storyboard.BLOCK_CONNECTIONS:
+            result = utils.block_connections(target_host_ip) if target_host_ip else False
+        elif action_type == Storyboard.ISOLATE_HOST:
+            result = utils.do_isolate_host(target_host_ip) if target_host_ip else False
+        elif action_type == Storyboard.DO_NOTHING:
+            result = utils.do_nothing()
         print(f"Current '{action_type}' operation executed ... Actual Result: {result}")
         reward = self.compute_reward(action_type, result, timestep)
         return int(reward)

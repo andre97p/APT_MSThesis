@@ -5,6 +5,7 @@ from pengym.envs.environment import PenGymEnv
 import random
 import numpy as np
 import ray
+import os
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 from ray.rllib.utils.typing import MultiAgentDict
@@ -17,37 +18,39 @@ from typing import cast
 from nasim.scenarios import make_benchmark_scenario
 from nasim.envs.utils import AccessLevel
 
+_DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "CONFIG.yml")
+
 class PenGymMultiEnv(MultiAgentEnv):
 
     """
     A Multi-Agent extension of Pengym environment
     """
 
-    def __init__(self, environment):
+    def __init__(self, scenario_name):
         super().__init__()
 
-        # Apply execution mode flags from env_config so Ray workers use the correct mode.
-        # Workers are separate processes and do not inherit main-process global state.
-        if "enable_pengym" in environment:
-            utils.ENABLE_PENGYM = environment["enable_pengym"]
-        if "enable_nasim" in environment:
-            utils.ENABLE_NASIM = environment["enable_nasim"]
+        config_path = os.path.abspath(_DEFAULT_CONFIG_PATH)
 
-        scenario = environment.get("scenario_name", "tiny")
-        scenario_obj = make_benchmark_scenario(scenario)
-        fully_obs = environment.get("fully_obs", False)
-        flat_actions = environment.get("flat_actions", True)
-        flat_obs = environment.get("flat_obs", True)
-        self.pengym_env = PenGymEnv(scenario_obj, fully_obs, flat_actions, flat_obs)
+        utils.init_config_info(config_path)
+        utils.init_service_port_map()
+        utils.init_host_map(config_path)
+
+
+
+        utils.ENABLE_PENGYM = True
+
+        scenario_obj = make_benchmark_scenario(scenario_name)
+
+        self.pengym_env = PenGymEnv(scenario_obj, False, True, True)
         self.agents = self.possible_agents = ["attacker", "defender"]
-        self.blue_executor= BlueActionExecutor(config=environment)
+        self.blue_executor= BlueActionExecutor(self.pengym_env)
         self.action_Space = {
             "attacker": self.pengym_env.action_space,
             "defender": Discrete(4)
         }
-        num_nodes= len(self.pengym_env.network.hosts)
-        num_services = 4
-        num_os = 1
+        num_nodes = len(self.pengym_env.network.hosts)
+        num_services = self.pengym_env.scenario.num_services
+        num_os = self.pengym_env.scenario.num_os
 
         self.observation_Space = {
             "attacker": self.pengym_env.observation_space,
@@ -69,8 +72,8 @@ class PenGymMultiEnv(MultiAgentEnv):
         matching the defined observation space keys and shapes.
         """
         num_nodes = len(self.pengym_env.network.hosts)
-        num_services = 4
-        num_os = 1
+        num_services = self.pengym_env.scenario.num_services
+        num_os = self.pengym_env.scenario.num_os
 
         # Defender sees all hosts in the network
         topology = np.ones(num_nodes, dtype=np.int8)
@@ -92,20 +95,11 @@ class PenGymMultiEnv(MultiAgentEnv):
 
         # One bit per alert slot (up to 10 per node)
         active_alerts = np.zeros(num_nodes * 10, dtype=np.int8)
-        if utils.ENABLE_PENGYM:
-            # Real mode: populate from live Snort alert list
-            alert_list = utils.alerts if hasattr(utils, 'alerts') else []
-            for j in range(min(len(alert_list), num_nodes * 10)):
-                active_alerts[j] = 1
-        else:
-            # Simulation mode: derive alerts from NASim state.
-            # A compromised host is treated as a confirmed intrusion alert so the
-            # defender receives a non-zero observation signal and can learn to respond.
-            for i, host_addr in enumerate(self.pengym_env.network.address_space):
-                if self.pengym_env.current_state.host_compromised(host_addr):
-                    active_alerts[i * 10] = 1  # one alert bit per compromised host
+        alert_list = utils.alerts if hasattr(utils, 'alerts') else []
+        for j in range(min(len(alert_list), num_nodes * 10)):
+            active_alerts[j] = 1
 
-        # Mark all service slots of isolated hosts as blocked
+
         firewall_status = np.zeros(num_nodes * num_services, dtype=np.int8)
         isolated = utils.isolated_hosts if hasattr(utils, 'isolated_hosts') else {}
         for i, host_addr in enumerate(self.pengym_env.network.address_space):
@@ -124,11 +118,11 @@ class PenGymMultiEnv(MultiAgentEnv):
         obs, info = self.pengym_env.reset(seed=seed, options=options)
 
         utils.clean_alertList()
-        if utils.ENABLE_PENGYM:
-            restore_isolated = utils.restore_isolated()
-            restore_connections = utils.unlock_connections()
-            print(f"Restoring shutted down connections gives {restore_isolated} result")
-            print(f"Restoring connection filters gives {restore_connections} result")
+
+        restore_isolated = utils.restore_isolated()
+        restore_connections = utils.unlock_connections()
+        print(f"Restoring shutted down connections gives {restore_isolated} result")
+        print(f"Restoring connection filters gives {restore_connections} result")
 
         self.agents = self.possible_agents[:]
         self._attacker_obs = obs  # persist so defender-turn step can return it

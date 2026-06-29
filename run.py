@@ -20,10 +20,6 @@ storyboard = Storyboard()
 # Constants
 #############################################################################
 
-# Agent types
-AGENT_TYPE_RANDOM = "random"
-AGENT_TYPE_DETERMINISTIC = "deterministic"
-DEFAULT_AGENT_TYPE = AGENT_TYPE_DETERMINISTIC
 
 # Other constants
 N_EPISODES=4000
@@ -36,12 +32,6 @@ RENDER_OBS_STATE = False
 
 # Select an action from the action space based on its name
 # 'action_name' and its target 'action_target'
-def select_action(action_space, action_name, action_target):
-    for i in range(0, action_space.n):
-        action = action_space.get_action(i)
-        if action.name == action_name and action.target == action_target:
-            return action
-
 #############################################################################
 # Create PenGym environment using scenario 'scenario_name'
 def create_pengym_environment(scenario_name):
@@ -91,9 +81,6 @@ def main(args):
     print("PenGym: Pentesting Training Framework for Reinforcement Learning Agents")
     print("#########################################################################")
 
-    # Default argument values
-    agent_type = DEFAULT_AGENT_TYPE
-    config_path = None
 
     # Parse command line arguments
     try:
@@ -130,7 +117,6 @@ def main(args):
 
     # Print parameters
     print(f"* Execution parameters:")
-    print(f"  - Agent type: {agent_type}")
     print(f"  - PenGym cyber range execution enabled: {utils.ENABLE_PENGYM}")
     print(f"  - NASim simulation execution enabled: {utils.ENABLE_NASIM}")
 
@@ -146,51 +132,15 @@ def main(args):
     # Create an experiment environment using scenario path
     scenario_path = utils.replace_file_path(utils.config_info, storyboard.SCENARIO_FILE)
     print(f"* Create environment using custom scenario from '{scenario_path}'...")
-    """
-    avg_reward = []
-    for number in range(5):  #five agents is the number considered in the experiment
-        if utils.ENABLE_PENGYM:
-            print(f"* Read configuration from '{config_path}'...")
-            utils.init_config_info(config_path)
-            
-            print("* Initialize MSF RPC client...")
-            utils.init_msfrpc_client()
-            
-            print("* Initialize Nmap Scanner...")
-            utils.init_nmap_scanner()
-            
-            # Create host map dictionary
-            range_detail_file = utils.replace_file_path(database=utils.config_info,
-                                                        file_name=storyboard.RANGE_DETAILS_FILE)
 
-            utils.init_host_map(range_details_file=range_detail_file)
+    print(f"* Starting MARL training on the custom cyber range")
 
-            # Initializer map of service ports
-            utils.init_service_port_map()
-        
-            # Deactivate bridge that not connected to Internet
-            utils.init_bridge_setup(range_details_file=range_detail_file)
-            
-        print(f"* Starting to train the agent {number+1} on the custom cyber range")
-        agent = training.RedAgent(env,learning_rate=0.01, initial_epsilon=1, epsilon_decay=1 / (N_EPISODES / 2), final_epsilon=0.05, discount_factor=0.99)
-        avg_reward.append(agent.training_agent_buffer(300,200,32))
-
-        print("* Clean up MSF RPC client...")
-        utils.cleanup_msfrpc_client()
-        print("* Restore the to intial state of the firewalls for all hosts...")
-        utils.save_restore_firewall_rules_all_hosts(flag=storyboard.RESTORE)
-        avg_reward = np.mean(avg_reward,0)
-        training.plot_rewards(avg_reward,1)
-    """
-    if utils.ENABLE_PENGYM:
-            print(f"* Starting MARL training on the custom cyber range")
-
-            
-            # Execute the multi-agent training
-            training_marl.execute_training(algo_type="ippo", training_iterations=10)
-            
-            print("* Clean up MSF RPC client...")
-            utils.cleanup_msfrpc_client()
+    
+    # Execute the multi-agent training
+    training_marl.execute_training(algo_type="ippo", training_iterations=20)
+    
+    print("* Clean up MSF RPC client...")
+    utils.cleanup_msfrpc_client()
 
 
 

@@ -19,7 +19,7 @@ This file implements the Multi-Agent algorithms to train the agents in the envir
 """
 
 
-temp_env= PenGymMultiEnv({})
+temp_env= PenGymMultiEnv(scenario_name="tiny")
 obs_space_attacker = temp_env.observation_Space["attacker"]
 act_space_attacker = temp_env.action_Space["attacker"]
 obs_space_defender = temp_env.observation_Space["defender"]
@@ -117,11 +117,12 @@ def config_MAPPO()->PPOConfig:
 
     ModelCatalog.register_custom_model("mappo_model", MappoArchitecture)
     ray.init(ignore_reinit_error=True)
-    tune.register_env("PenGymMultiEnv-v0", lambda config: PenGymMultiEnv(config))
+    tune.register_env("PenGymMultiEnv-v0", lambda env_config: PenGymMultiEnv(scenario_name="tiny"))
 
     config = PPOConfig()
 
     config.environment("PenGymMultiEnv-v0", env_config={
+        "scenario_name": "tiny",
         "enable_nasim": True,
         "enable_pengym": False,
     })
@@ -164,14 +165,15 @@ def config_MAPPO()->PPOConfig:
 
 def config_IPPO()->PPOConfig:
     ray.init(ignore_reinit_error=True)
-    tune.register_env("PenGymMultiEnv-v0", lambda config: PenGymMultiEnv(config))
-    
+    tune.register_env("PenGymMultiEnv-v0", lambda env_config: PenGymMultiEnv(scenario_name=env_config.get("scenario_name", "tiny")))
+
     config = PPOConfig()
     config.api_stack(
         enable_rl_module_and_learner=False,
         enable_env_runner_and_connector_v2=False
     )
     config.environment("PenGymMultiEnv-v0", env_config={
+        "scenario_name": "tiny",
         "enable_nasim": True,
         "enable_pengym": False,
     })
