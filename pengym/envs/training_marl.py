@@ -1,4 +1,5 @@
 from pengym.envs.marl_environment import PenGymMultiEnv
+from pengym.envs.plot_results import plot_rewards, plot_steps
 import ray
 from ray import tune
 from ray.rllib.algorithms.ppo import PPOConfig
@@ -10,6 +11,7 @@ from torch import zeros
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
 from ray.rllib.models import ModelCatalog
 from gymnasium.spaces.utils import flatdim
+import numpy as np
 
 
 """
@@ -201,44 +203,59 @@ def config_IPPO()->PPOConfig:
 
     return config
     
+
 def execute_training(algo_type, training_iterations=4000):
     """
     Initializes and executes the MARL training loop using RLlib.
+
+    Returns:
+        history (dict) with keys:
+            'attacker_reward'  - mean reward for attacker_policy per iteration
+            'defender_reward'  - mean reward for defender_policy per iteration
+            'episode_len_mean' - mean steps per episode per iteration
     """
-    avg_steps=[]
-    config:PPOConfig
+    history = {
+        'attacker_reward':  [],
+        'defender_reward':  [],
+        'episode_len_mean': [],
+    }
+
+    config: PPOConfig
     if algo_type == "mappo":
         print("[*] Compiling MAPPO Configuration (CTDE)...")
         config = config_MAPPO()
-        
     elif algo_type == "ippo":
         print("[*] Compiling IPPO Configuration (Decentralized)...")
         config = config_IPPO()
     else:
-        raise ValueError("Algorithm type must be 'Mappo' or 'Ippo'")
+        raise ValueError("Algorithm type must be 'mappo' or 'ippo'")
 
     print(f"[*] Building {algo_type.upper()} algorithm graph...")
     algo = config.build_algo()
 
     print(f"[*] Starting {algo_type.upper()} training loop for {training_iterations} iterations...")
-    
-    #The Execution Loop
+
     for i in range(training_iterations):
         result = algo.train()
+        policy_rewards = result["env_runners"]['policy_reward_mean']
+        att_rew = policy_rewards['attacker_policy']
+        def_rew = policy_rewards['defender_policy']
+        ep_len  = int(result['env_runners']['episode_len_mean'])
+
+        history['attacker_reward'].append(att_rew)
+        history['defender_reward'].append(def_rew)
+        history['episode_len_mean'].append(ep_len)
+
+        print(f"Iteration {i+1}/{training_iterations} | "
+              f"Attacker Return: {att_rew} | "
+              f"Defender Return: {def_rew} | "
+              f"Avg Steps: {ep_len}")
         
-        policy_rewards = result.get('policy_reward_mean', {})
-        reward_attacker = policy_rewards.get('attacker_policy', 0.0)
-        reward_defender = policy_rewards.get('defender_policy', 0.0)
-        
-        # Print a formatted string to monitor the zero-sum dynamics
-        print(f"Iteration {i+1} | "
-              f"Attacker Reward: {reward_attacker} | "
-              f"Defender Reward: {reward_defender} | "
-              f"Total Env Steps: {result.get('num_env_steps_sampled', 0)}")
-        avg_steps.append(result.get('num_env_steps_sampled', 0))
-        #Checkpoint saving (Crucial for later inference/evaluation)
-        if (i + 1) % 100 == 0:
+        """if (i + 1) % 100 == 0:
             checkpoint_dir = algo.save(checkpoint_dir=f"./checkpoints/{algo_type}_{i+1}")
             print(f"[*] Checkpoint saved at: {checkpoint_dir}")
+        """
+    plot_rewards(history, algo_type=algo_type)
+    plot_steps(history, algo_type=algo_type)
 
-        
+    return history

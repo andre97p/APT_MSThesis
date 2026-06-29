@@ -146,7 +146,6 @@ def main(args):
     # Create an experiment environment using scenario path
     scenario_path = utils.replace_file_path(utils.config_info, storyboard.SCENARIO_FILE)
     print(f"* Create environment using custom scenario from '{scenario_path}'...")
-    env = create_pengym_environment("tiny")
     """
     avg_reward = []
     for number in range(5):  #five agents is the number considered in the experiment
@@ -188,13 +187,11 @@ def main(args):
 
             
             # Execute the multi-agent training
-            training_marl.execute_training(algo_type="ippo", training_iterations=300)
+            training_marl.execute_training(algo_type="ippo", training_iterations=10)
             
             print("* Clean up MSF RPC client...")
             utils.cleanup_msfrpc_client()
-            print("* Restore the to intial state of the firewalls for all hosts...")
-            utils.save_restore_firewall_rules_all_hosts(flag=storyboard.RESTORE)
-            # ...
+
 
 
 #############################################################################

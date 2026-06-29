@@ -45,8 +45,8 @@ class BlueActionExecutor:
         Check_status: R=3,C=1 | Block_connections: R=6,C=3
         Isolate_host: R=30,C=20 | Do_Nothing: R=0,C=1
         """
-        beta = 0.01
-        mu = min(100, math.exp(beta * delta_t))
+        beta = 0.001
+        mu = min(40, math.exp(beta * delta_t))
         actual_reward=self.action_reward[action_type] if result==True else 0
         formula = (actual_reward - self.action_cost[action_type]) - mu
         

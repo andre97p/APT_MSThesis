@@ -15,6 +15,7 @@ from pengym.storyboard import Storyboard
 from pengym.envs.blue_vector import BlueActionExecutor
 from typing import cast
 from nasim.scenarios import make_benchmark_scenario
+from nasim.envs.utils import AccessLevel
 
 class PenGymMultiEnv(MultiAgentEnv):
 
@@ -32,7 +33,7 @@ class PenGymMultiEnv(MultiAgentEnv):
         if "enable_nasim" in environment:
             utils.ENABLE_NASIM = environment["enable_nasim"]
 
-        scenario = environment.get("scenario_name", "medium-multi-site")
+        scenario = environment.get("scenario_name", "tiny")
         scenario_obj = make_benchmark_scenario(scenario)
         fully_obs = environment.get("fully_obs", False)
         flat_actions = environment.get("flat_actions", True)
@@ -59,6 +60,8 @@ class PenGymMultiEnv(MultiAgentEnv):
         })
 
         }
+        self._attacker_obs = None
+        self.steps = 0
 
     def _get_defender_obs(self) -> dict:
         """
@@ -169,8 +172,17 @@ class PenGymMultiEnv(MultiAgentEnv):
             print("Red Agent Turn")
             obs, attacker_reward, terminated, truncated, attacker_info = self.pengym_env.step(int(action))
 
+            # End episode as soon as attacker achieves privilege escalation (ROOT) on any host.
+            if not terminated:
+                for host_addr in self.pengym_env.network.address_space:
+                    if self.pengym_env.current_state.host_has_access(host_addr, AccessLevel.ROOT):
+                        terminated = True
+                        print(f"Episode terminated: attacker escalated to ROOT on host {host_addr}")
+                        break
+
             self._attacker_obs = obs  # persist so defender-turn step can return it
 
+            print(f"Attacker Reward: {attacker_reward}")
             rewards["attacker"] = attacker_reward
             rewards["defender"] = -attacker_reward
 
@@ -199,6 +211,7 @@ class PenGymMultiEnv(MultiAgentEnv):
 
             actual_reward = self.blue_executor.execute_action(
                 action_type=action_type, target_host_ip=target_ip, timestep=self.steps)
+            print(f"Defender Reward: {actual_reward}")
             rewards["defender"] = actual_reward
             rewards["attacker"] = -actual_reward
 
