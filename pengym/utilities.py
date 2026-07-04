@@ -4,7 +4,7 @@ import numpy as np
 import psutil
 from pymetasploit3.msfrpc import MsfRpcClient
 from pengym.storyboard import Storyboard
-
+import math
 import sys
 import nmap
 import subprocess
@@ -295,11 +295,14 @@ def init_host_map(range_details_file, instance_index = 1):
         instance_index (int, optional): instance number of network in clone setting 
         that compatible with CyRIS scenario (Default = 1)
     """
+    global host_map
     try:
-        global host_map
         host_map = create_host_map(range_details_file, instance_index)
     except Exception as e:
-        print(f"* WARNING: Failed to create host map: {e}", file=sys.stderr)
+        # Fail loudly: a missing host_map only surfaces much later as a cryptic
+        # "module 'pengym.utilities' has no attribute 'host_map'" inside a worker.
+        print(f"* ERROR: Failed to create host map from '{range_details_file}': {e}", file=sys.stderr)
+        raise
 
 def reset_host_map():
     """Reset the neccessary attribute of host map
@@ -713,7 +716,7 @@ def replace_file_path(database, file_name):
             .replace(storyboard.RANGE_ID_PATTERN, str(database[storyboard.RANGE_ID]))\
             .replace(storyboard.CYBER_RANGE_DIR_PATTERN, database[storyboard.CYBER_RANGE_DIR])
 
-def check_status(alert_log_path="/var/log/snort/snort.alert", tail_lines=100):
+def check_status(alert_log_path="/var/log/snort/snort.alert.fast", tail_lines=100):
     """
     Ingests recent telemetry from the Snort alert log to assess the presence of
     malicious activities. Parses the fast-alert format to populate the Blue Team
@@ -791,18 +794,33 @@ def do_isolate_host(host_ip,hypervisor_target="root@192.168.1.1"):
             execute_script(f"logger -t PENGYM_ERR 'virsh setlink command execution failed for address {host_ip}. Exit code: {e.returncode}'")
             return False
 
-def restore_isolated():
+def restore_isolated(hypervisor_target="root@192.168.1.1"):
     """
-    Restore the lists of isolated hosts. Relying on a repristine backup file ensures 
-    immediate state space sanitization and reverts the heuristic engine to its elder ruleset. Networks status comes ready for a new episode.
+    Bring back up every guest NIC that was shut down by do_isolate_host, readying
+    the network for a new episode.
+
+    The link must be restored from the hypervisor with the same mechanism used to
+    take it down (virsh domif-setlink ... up). The previous implementation tried to
+    SSH into the guest itself to run `ip link set`, which is impossible: the guest's
+    interface is down, so it is unreachable over the network. It also used the
+    hypervisor-side tap/vnet name as if it were the guest's internal interface, and
+    cleared the dict while iterating over it.
     """
     global isolated_hosts
+
+    all_restored = True
     for target_ip, target_interface in isolated_hosts.items():
-            command = f"ssh vagrant@{target_ip} 'sudo ip link set {target_interface} up'"
-            execute_script(command)
+        try:
+            command = f"ssh {hypervisor_target} 'virsh domif-setlink {target_ip} {target_interface} up'"
+            subprocess.check_call(command, shell=True)
             execute_script(f"logger -t SNORT_AR 'Node restoration executed: Interface {target_interface} (IP: {target_ip}) transitioned to UP state.'")
-            isolated_hosts.clear()
-    return True
+        except subprocess.CalledProcessError as e:
+            all_restored = False
+            execute_script(f"logger -t PENGYM_ERR 'virsh setlink up command failed for address {target_ip}. Exit code: {e.returncode}'")
+
+    # Clear the map only after iteration completes to avoid mutating it mid-loop.
+    isolated_hosts.clear()
+    return all_restored
 
 def block_connections(target_ip=None, rule_path="/etc/snort/rules/local.rules"):
     """
@@ -848,12 +866,17 @@ def block_connections(target_ip=None, rule_path="/etc/snort/rules/local.rules"):
         rules_str = '\n'.join(mitigation_rules)
         command = f"echo -e '{rules_str}' | sudo tee -a {rule_path} && sudo systemctl reload snort"
         execute_script(command)
-        current_sid=2000000
+        # NOTE: do NOT reset current_sid here. Snort refuses to load a ruleset
+        # containing duplicate SIDs, so reusing 2000000.. on the next call would
+        # make `systemctl reload snort` fail and silently break every subsequent
+        # mitigation. The counter must keep increasing for the lifetime of the
+        # injected rules; it is reset only when the ruleset is flushed back to the
+        # pristine baseline in unlock_connections() (i.e. on episode reset).
         # Dispatch aggregate telemetry to the kernel logger for empirical evaluation metrics
         syslog_msg = f"Closed-loop mitigation executed: {len(mitigation_rules)} dynamic rules injected based on IDS telemetry."
         execute_script(f"logger -t SNORT_AR '{syslog_msg}'")
         return True
-        
+
     return False
 
 def unlock_connections(backup_path="/etc/snort/rules/local.rules.bak", rule_path="/etc/snort/rules/local.rules"):
@@ -862,12 +885,19 @@ def unlock_connections(backup_path="/etc/snort/rules/local.rules.bak", rule_path
     dynamic bidirectional blocking rules. Relying on a pristine backup file ensures 
     immediate state space sanitization and reverts the heuristic engine to its elder ruleset.
     """
+    global current_sid
+
     # Overwrite the modified configuration with the sterile baseline to flush active mitigations
     command = f"sudo cp {backup_path} {rule_path} && sudo systemctl reload snort"
     execute_script(command)
+
+    # The injected SIDs are gone with the ruleset, so it is now safe to rewind the
+    # counter to its base value for the next episode without risking collisions.
+    current_sid = 2000000
+
     syslog_msg = "Full policy rollback executed: all active connection constraints deprecated. Elder ruleset restored."
     execute_script(f"logger -t SNORT_AR '{syslog_msg}'")
-    
+
     return True
 
 
@@ -929,3 +959,7 @@ def do_nothing():
     The defender keep resources until a suspicious event will occur.
     """
     return True
+
+def regularize(beta,delta_t, threshold):
+    w = min(threshold,(1/ math.exp(- beta * delta_t)))
+    return w

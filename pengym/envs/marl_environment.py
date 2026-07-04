@@ -16,7 +16,6 @@ from pengym.storyboard import Storyboard
 from pengym.envs.blue_vector import BlueActionExecutor
 from typing import cast
 from nasim.scenarios import make_benchmark_scenario
-from nasim.envs.utils import AccessLevel
 
 _DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "CONFIG.yml")
 
@@ -26,22 +25,42 @@ class PenGymMultiEnv(MultiAgentEnv):
     A Multi-Agent extension of Pengym environment
     """
 
-    def __init__(self, scenario_name):
+    def __init__(self, scenario_name="tiny", env_config=None):
         super().__init__()
+
+        env_config = env_config or {}
+        scenario_name = env_config.get("scenario_name", scenario_name)
 
         config_path = os.path.abspath(_DEFAULT_CONFIG_PATH)
 
         utils.init_config_info(config_path)
         utils.init_service_port_map()
-        utils.init_host_map(config_path)
 
+        # Execution backend: default to the emulated PenGym cyber range
+        # (ENABLE_NASIM=False). Overridable through the RLlib env_config.
+        utils.ENABLE_PENGYM = bool(env_config.get("enable_pengym", True))
+        utils.ENABLE_NASIM = bool(env_config.get("enable_nasim", False))
 
-
-        utils.ENABLE_PENGYM = True
+        # The live cyber-range backend needs Metasploit, Nmap and the CyRIS
+        # host map built from the range-details file (NOT CONFIG.yml).
+        range_detail_file = None
+        if utils.ENABLE_PENGYM:
+            utils.init_msfrpc_client()
+            utils.init_nmap_scanner()
+            range_detail_file = utils.replace_file_path(
+                database=utils.config_info,
+                file_name=Storyboard.RANGE_DETAILS_FILE)
+            utils.init_host_map(range_details_file=range_detail_file)
 
         scenario_obj = make_benchmark_scenario(scenario_name)
 
         self.pengym_env = PenGymEnv(scenario_obj, False, True, True)
+
+        # Bridge setup relies on utils.scenario, which PenGymEnv sets above,
+        # so it must run after the environment has been constructed.
+        if utils.ENABLE_PENGYM:
+            utils.init_bridge_setup(range_details_file=range_detail_file)
+
         self.agents = self.possible_agents = ["attacker", "defender"]
         self.blue_executor= BlueActionExecutor(self.pengym_env)
         self.action_Space = {
@@ -65,6 +84,8 @@ class PenGymMultiEnv(MultiAgentEnv):
         }
         self._attacker_obs = None
         self.steps = 0
+
+        self.max_episode_steps = int(env_config.get("max_episode_steps", 300))
 
     def _get_defender_obs(self) -> dict:
         """
@@ -123,6 +144,7 @@ class PenGymMultiEnv(MultiAgentEnv):
         restore_connections = utils.unlock_connections()
         print(f"Restoring shutted down connections gives {restore_isolated} result")
         print(f"Restoring connection filters gives {restore_connections} result")
+        utils.cleanup_msfrpc_client()
 
         self.agents = self.possible_agents[:]
         self._attacker_obs = obs  # persist so defender-turn step can return it
@@ -146,45 +168,32 @@ class PenGymMultiEnv(MultiAgentEnv):
         opponent = "attacker" if self.current_agent == "defender" else "defender"
         action = action_dict.get(self.current_agent)
         rewards = {a: 0 for a in self.agents}
-        terminations = {"__all__": False}
-        truncations = {"__all__": False}
         infos = {}
 
-        # Handle episode boundaries
+
         if self.terminations.get(self.current_agent) or self.truncations.get(self.current_agent):
             print("Epoch is over")
-            terminations["__all__"] = True
-            return (cast(MultiAgentDict, {}),
-                    cast(MultiAgentDict, rewards),
-                    cast(MultiAgentDict, terminations),
-                    cast(MultiAgentDict, truncations),
-                    cast(MultiAgentDict, infos))
-
-        next_obs: MultiAgentDict = {}
+            return self._episode_end_return(rewards, infos)
 
         if self.current_agent == "attacker":
             print("Red Agent Turn")
             obs, attacker_reward, terminated, truncated, attacker_info = self.pengym_env.step(int(action))
-
-            # End episode as soon as attacker achieves privilege escalation (ROOT) on any host.
-            if not terminated:
-                for host_addr in self.pengym_env.network.address_space:
-                    if self.pengym_env.current_state.host_has_access(host_addr, AccessLevel.ROOT):
-                        terminated = True
-                        print(f"Episode terminated: attacker escalated to ROOT on host {host_addr}")
-                        break
+            #w=utils.regularize(0.01,self.steps,50)
+            #attacker_reward=attacker_reward - w
 
             self._attacker_obs = obs  # persist so defender-turn step can return it
 
-            print(f"Attacker Reward: {attacker_reward}")
-            rewards["attacker"] = attacker_reward
-            rewards["defender"] = -attacker_reward
+            print(f"Attacker Reward: {int(attacker_reward)}")
+            rewards["attacker"] = (attacker_reward)
+            rewards["defender"] = -(attacker_reward)
 
+            # Rely on NASim's native goal condition for termination. 
+            if terminated:
+                print("Episode terminated: all sensitive hosts compromised "
+                      f"{self.pengym_env.network.sensitive_addresses}")
             self.terminations = {a: terminated for a in self.agents}
             self.truncations = {a: truncated for a in self.agents}
             infos[opponent] = attacker_info
-
-            next_obs = {opponent: self._get_defender_obs()}
 
         elif self.current_agent == "defender":
             print("Blue Agent Turn")
@@ -215,12 +224,53 @@ class PenGymMultiEnv(MultiAgentEnv):
                 "success": rewards
             }
 
+        self.steps += 1
+
+
+        if self.steps >= self.max_episode_steps and not all(self.terminations.values()):
+            self.truncations = {a: True for a in self.agents}
+            print(f"Episode truncated: reached max_episode_steps={self.max_episode_steps}")
+
+        episode_over = all(self.terminations.values()) or all(self.truncations.values())
+
+        if episode_over:
+
+            return self._episode_end_return(rewards, infos)
+
+        # Mid-episode: pass the turn to the opponent only.
+        if opponent == "defender":
+            next_obs: MultiAgentDict = {opponent: self._get_defender_obs()}
+        else:
             next_obs = {opponent: self._attacker_obs}
 
-        terminations["__all__"] = all(self.terminations.values())
-        truncations["__all__"] = all(self.truncations.values())
+        terminations = {a: self.terminations[a] for a in self.agents}
+        terminations["__all__"] = False
+        truncations = {a: self.truncations[a] for a in self.agents}
+        truncations["__all__"] = False
         self.current_agent = opponent
-        self.steps += 1
+
+        return (cast(MultiAgentDict, next_obs),
+                cast(MultiAgentDict, rewards),
+                cast(MultiAgentDict, terminations),
+                cast(MultiAgentDict, truncations),
+                cast(MultiAgentDict, infos))
+
+    def _episode_end_return(self, rewards, infos):
+        """
+        Build the terminal step return for a finished episode.
+
+        Both agents receive a final observation, their per-agent done flag and the
+        `__all__` marker so RLlib can close out *both* trajectories in a single step,
+        regardless of whose turn ended the episode.
+        """
+        next_obs: MultiAgentDict = {
+            "attacker": self._attacker_obs,
+            "defender": self._get_defender_obs(),
+        }
+        terminations = {a: bool(self.terminations.get(a, False)) for a in self.agents}
+        truncations = {a: bool(self.truncations.get(a, False)) for a in self.agents}
+        terminations["__all__"] = all(terminations[a] for a in self.agents)
+        truncations["__all__"] = all(truncations[a] for a in self.agents)
 
         return (cast(MultiAgentDict, next_obs),
                 cast(MultiAgentDict, rewards),

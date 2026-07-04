@@ -22,8 +22,8 @@ storyboard = Storyboard()
 
 
 # Other constants
-N_EPISODES=4000
-MAX_STEPS = 150 # Max number of pentesting steps (sys.maxsize to disable)
+N_EPISODES=10
+ITERATIONS_PER_EPISODE = 300 # Number of RLlib training iterations composing each episode
 RENDER_OBS_STATE = False
 
 #############################################################################
@@ -136,8 +136,10 @@ def main(args):
     print(f"* Starting MARL training on the custom cyber range")
 
     
-    # Execute the multi-agent training
-    training_marl.execute_training(algo_type="ippo", training_iterations=20)
+    training_marl.execute_training(
+        algo_type="ippo",
+        num_episodes=N_EPISODES,
+        iterations_per_episode=ITERATIONS_PER_EPISODE)
     
     print("* Clean up MSF RPC client...")
     utils.cleanup_msfrpc_client()
