@@ -62,9 +62,12 @@ def load_yaml_file(file_path):
 
 def execute_script(command):
     """Execute the shell command script
-        
+
         Args:
             command (str): shell command
+
+        Returns:
+            (bool): True if the command exited with status 0, False otherwise
         """
 
     # Execute the command and capture the output
@@ -72,9 +75,10 @@ def execute_script(command):
 
     # Check the return code
     if result.returncode == 0:
-        pass
+        return True
     else:
         print("Error: ", result.stderr)
+        return False
 
 def init_config_info(config_path):
     """Parse the config file into config information
@@ -451,12 +455,6 @@ def map_IP_adress_to_host_address(host_map, ip_list):
 def print_failure(action, observation, context, exec_time):
     """Print out the error types of actions on current host
        There are 3 kinds of error: connection error, permission error and undefined error
-
-    Args:
-        action (Action): The current action is executed 
-        observation (ActionResult): The result information of the action
-        context (str): pengym/nasim
-        exec_time (double): Execution time
     """
     print(f"  Host {action.target} Action '{action.name}' FAILURE:"
                   f"{' connection_error=TRUE' if observation.connection_error else ''}"
@@ -726,7 +724,10 @@ def check_status(alert_log_path="/var/log/snort/snort.alert.fast", tail_lines=10
       MM/DD-HH:MM:SS.us  [**] [gid:sid:rev] message [**] [Classification: ...] [Priority: N] {PROTO} src_ip:port -> dst_ip:port
     Returns True when new alerts are detected (action succeeded), False otherwise.
     """
-    command = f"sudo tail -n {tail_lines} {alert_log_path}"
+    # No sudo: the training user is in the 'adm' group and can read the Snort
+    # fast-alert log directly. `sudo` here fails non-interactively (no NOPASSWD),
+    # which would make check_status() always report zero alerts.
+    command = f"tail -n {tail_lines} {alert_log_path}"
 
     try:
         raw_telemetry = subprocess.check_output(
@@ -768,52 +769,78 @@ def clean_alertList():
     alerts.clear()
     return True
 
-def do_isolate_host(host_ip,hypervisor_target="root@192.168.1.1"):
-    """Isolates the selected host by turning the interface down"""
+def _resolve_domain(host_ip):
+    """Resolve a host IP address to its libvirt domain name via host_map.
+
+    virsh operates on domain names (e.g. 'host-1-0_cr126_1_1'), not IP addresses,
+    so isolate/restore must translate the alert's src_ip before calling virsh.
+    """
+    global host_map
+    try:
+        for _, value in host_map.items():
+            if host_ip in value[storyboard.HOST_IP]:
+                return value[storyboard.KVM_DOMAIN]
+    except (NameError, KeyError, TypeError):
+        pass
+    return None
+
+def do_isolate_host(host_ip):
+    """Isolate the selected host by turning its (attacker-facing) virtual NIC down.
+
+    The range VMs run on THIS host, so containment is done through the LOCAL libvirt
+    daemon (no SSH to a remote hypervisor). The incoming IP is resolved to its
+    libvirt domain name, and the NIC facing that IP's subnet is the one taken down.
+    """
     global isolated_hosts
 
     if host_ip in isolated_hosts:
         return False
-    else:
-        target_interface= _get_interface_guest(host_ip)
-        if not target_interface:
-            execute_script(f"logger -t COMP_PENGYM_ERR 'Could not resolve tap interface for address {host_ip}'")
-            return False
-        try:
-    # Issue the virsh domif-setlink command to transition the virtual NIC to a DOWN state
-            command = f"ssh {hypervisor_target} 'virsh domif-setlink {host_ip} {target_interface} down'"
-            subprocess.check_call(command, shell=True)
-    
-            isolated_hosts[host_ip] = target_interface
 
-            execute_script(f"logger -t SNORT_AR 'Out-of-band containment executed: Link state for {target_interface} on address {host_ip} set to DOWN via virsh.'")
-            return True
-        
-        except subprocess.CalledProcessError as e:
+    domain_name = _resolve_domain(host_ip)
+    if not domain_name:
+        execute_script(f"logger -t COMP_PENGYM_ERR 'Could not resolve libvirt domain for address {host_ip}'")
+        return False
 
-            execute_script(f"logger -t PENGYM_ERR 'virsh setlink command execution failed for address {host_ip}. Exit code: {e.returncode}'")
-            return False
+    # Pick the NIC facing this IP's subnet: 126.1.<n>.x -> bridge br126-1-<n>.
+    parts = host_ip.split('.')
+    target_bridge = f"br{parts[0]}-{parts[1]}-{parts[2]}" if len(parts) == 4 else None
+    target_interface = _get_interface_guest(domain_name, target_bridge)
+    if not target_interface:
+        execute_script(f"logger -t COMP_PENGYM_ERR 'Could not resolve tap interface for address {host_ip}'")
+        return False
 
-def restore_isolated(hypervisor_target="root@192.168.1.1"):
+    try:
+        # Transition the guest's virtual NIC to a DOWN state via the local libvirt daemon.
+        command = f"virsh -c qemu:///system domif-setlink {domain_name} {target_interface} down"
+        subprocess.check_call(command, shell=True)
+
+        isolated_hosts[host_ip] = (domain_name, target_interface)
+
+        execute_script(f"logger -t SNORT_AR 'Out-of-band containment executed: Link state for {target_interface} on domain {domain_name} ({host_ip}) set to DOWN via virsh.'")
+        return True
+
+    except subprocess.CalledProcessError as e:
+        execute_script(f"logger -t PENGYM_ERR 'virsh setlink command execution failed for address {host_ip}. Exit code: {e.returncode}'")
+        return False
+
+def restore_isolated():
     """
-    Bring back up every guest NIC that was shut down by do_isolate_host, readying
-    the network for a new episode.
+    Bring back up every guest NIC that do_isolate_host shut down, readying the
+    network for a new episode.
 
-    The link must be restored from the hypervisor with the same mechanism used to
-    take it down (virsh domif-setlink ... up). The previous implementation tried to
-    SSH into the guest itself to run `ip link set`, which is impossible: the guest's
-    interface is down, so it is unreachable over the network. It also used the
-    hypervisor-side tap/vnet name as if it were the guest's internal interface, and
-    cleared the dict while iterating over it.
+    Restoration uses the LOCAL libvirt daemon with the same mechanism that took the
+    link down (virsh domif-setlink ... up). The (domain, interface) pair recorded at
+    isolation time is reused, so there is no need to reach the guest over the network
+    (which is impossible while its NIC is down) or to guess interface names.
     """
     global isolated_hosts
 
     all_restored = True
-    for target_ip, target_interface in isolated_hosts.items():
+    for target_ip, (domain_name, target_interface) in isolated_hosts.items():
         try:
-            command = f"ssh {hypervisor_target} 'virsh domif-setlink {target_ip} {target_interface} up'"
+            command = f"virsh -c qemu:///system domif-setlink {domain_name} {target_interface} up"
             subprocess.check_call(command, shell=True)
-            execute_script(f"logger -t SNORT_AR 'Node restoration executed: Interface {target_interface} (IP: {target_ip}) transitioned to UP state.'")
+            execute_script(f"logger -t SNORT_AR 'Node restoration executed: Interface {target_interface} on domain {domain_name} (IP: {target_ip}) transitioned to UP state.'")
         except subprocess.CalledProcessError as e:
             all_restored = False
             execute_script(f"logger -t PENGYM_ERR 'virsh setlink up command failed for address {target_ip}. Exit code: {e.returncode}'")
@@ -864,15 +891,13 @@ def block_connections(target_ip=None, rule_path="/etc/snort/rules/local.rules"):
     if mitigation_rules:
         # Batch the rule injections and issue a SIGHUP to gracefully reload the DAQ state space
         rules_str = '\n'.join(mitigation_rules)
-        command = f"echo -e '{rules_str}' | sudo tee -a {rule_path} && sudo systemctl reload snort"
-        execute_script(command)
-        # NOTE: do NOT reset current_sid here. Snort refuses to load a ruleset
-        # containing duplicate SIDs, so reusing 2000000.. on the next call would
-        # make `systemctl reload snort` fail and silently break every subsequent
-        # mitigation. The counter must keep increasing for the lifetime of the
-        # injected rules; it is reset only when the ruleset is flushed back to the
-        # pristine baseline in unlock_connections() (i.e. on episode reset).
-        # Dispatch aggregate telemetry to the kernel logger for empirical evaluation metrics
+        # Use printf, NOT `echo -e`: subprocess(shell=True) runs /bin/sh (dash),
+        command = f"printf '%s\\n' '{rules_str}' | sudo tee -a {rule_path} && sudo systemctl reload snort"
+        # Only claim success if the rules were actually written AND Snort reloaded;
+        # otherwise the agent would earn reward for a mitigation that never applied.
+        if not execute_script(command):
+            execute_script("logger -t PENGYM_ERR 'block_connections: rule injection/reload failed (check sudo NOPASSWD for tee + systemctl reload snort).'")
+            return False
         syslog_msg = f"Closed-loop mitigation executed: {len(mitigation_rules)} dynamic rules injected based on IDS telemetry."
         execute_script(f"logger -t SNORT_AR '{syslog_msg}'")
         return True
@@ -889,7 +914,12 @@ def unlock_connections(backup_path="/etc/snort/rules/local.rules.bak", rule_path
 
     # Overwrite the modified configuration with the sterile baseline to flush active mitigations
     command = f"sudo cp {backup_path} {rule_path} && sudo systemctl reload snort"
-    execute_script(command)
+    if not execute_script(command):
+        # Do NOT rewind current_sid: if the restore failed the injected rules are
+        # still loaded, so reusing their SIDs on the next block would collide and
+        # make `systemctl reload snort` fail.
+        execute_script("logger -t PENGYM_ERR 'unlock_connections: baseline restore/reload failed (check sudo NOPASSWD for cp + systemctl reload snort).'")
+        return False
 
     # The injected SIDs are gone with the ruleset, so it is now safe to rewind the
     # counter to its base value for the next episode without risking collisions.
@@ -907,7 +937,8 @@ def get_active_snort_rules(rule_path="/etc/snort/rules/local.rules"):
     packet filtering heuristics. Returns an array of active rule signatures
     to populate the Blue Team agent's observation vector.
     """
-    command = f"sudo cat {rule_path}"
+    # local.rules is world-readable; sudo would only fail non-interactively.
+    command = f"cat {rule_path}"
     
     try:
         raw_rules = subprocess.check_output(command, shell=True, text=True)
@@ -924,34 +955,39 @@ def get_active_snort_rules(rule_path="/etc/snort/rules/local.rules"):
         error_msg = f"Failed to poll Snort rules facility at {rule_path}. Exit code: {e.returncode}"
         execute_script(f"logger -t PENGYM_ERR '{error_msg}'")
         return []
-def _get_interface_guest(domain_name, hypervisor_target="root@192.168.1.1"):
+def _get_interface_guest(domain_name, bridge=None):
     """
-    Dynamically resolves the network interface (e.g., vnet0, tap1) bound to a KVM guest 
-    by interrogating the libvirt daemon directly on the host machine.
+    Resolve the host tap interface (e.g. vnet0) bound to a KVM guest by querying the
+    LOCAL libvirt daemon (the range VMs run on this host).
+
+    If `bridge` is given, the interface attached to that bridge is returned, so a
+    multi-homed guest is isolated on the correct, attacker-facing NIC; otherwise the
+    first interface is returned.
     """
     try:
+        command = f"virsh -c qemu:///system domiflist {domain_name}"
 
-        command = f"ssh {hypervisor_target} 'virsh domiflist {domain_name}'"
-        
         # Dispatch the subprocess and capture the standard output stream
         virsh_output = subprocess.check_output(command, shell=True, text=True)
-        
+
         lines = virsh_output.strip().split('\n')
-        
-        # Validate that the output contains the payload sequence (header + separator + data)
-        if len(lines) > 2:
-            # Extract the first valid data vector
-            data_row = lines[2].strip()
-            if data_row:
-                # The virtual interface name is deterministically the first token
-                target_interface = data_row.split()[0]
-                return target_interface
-                    
+
+        # Data rows follow the header line and the '---' separator (index >= 2).
+        # Columns: Interface  Type  Source(bridge)  Model  MAC
+        data_rows = [ln.split() for ln in lines[2:] if ln.strip()]
+
+        if bridge:
+            for cols in data_rows:
+                if len(cols) >= 3 and cols[2] == bridge:
+                    return cols[0]
+        if data_rows:
+            return data_rows[0][0]
+
     except subprocess.CalledProcessError as e:
         error_msg = f"libvirt topology resolution failed for domain '{domain_name}'. Exit code: {e.returncode}"
         execute_script(f"logger -t PENGYM_ERR '{error_msg}'")
         return None
-        
+
     return None
 
 def do_nothing():

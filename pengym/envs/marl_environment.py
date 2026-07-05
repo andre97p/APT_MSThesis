@@ -144,7 +144,6 @@ class PenGymMultiEnv(MultiAgentEnv):
         restore_connections = utils.unlock_connections()
         print(f"Restoring shutted down connections gives {restore_isolated} result")
         print(f"Restoring connection filters gives {restore_connections} result")
-        utils.cleanup_msfrpc_client()
 
         self.agents = self.possible_agents[:]
         self._attacker_obs = obs  # persist so defender-turn step can return it

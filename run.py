@@ -2,7 +2,6 @@
 #############################################################################
 # Run demo of PenGym functionality
 #############################################################################
-
 import time
 import pengym
 import numpy as np
@@ -39,7 +38,7 @@ def create_pengym_environment(scenario_name):
 
     # Initialize seed for numpy (used to determine exploit success/failure) and
     # for the environment action space (used to determine order of random actions)
-    seed = 1 # NORMAL: No e_ssh failure during pentesting path
+    seed = 1 #NORMAL: No e_ssh failure during pentesting path
     #seed = 300 # INCOMPLETE: Cause e_ssh failure during pentesting path
     np.random.seed(seed)
     env.action_space.seed(1)
@@ -141,7 +140,7 @@ def main(args):
         num_episodes=N_EPISODES,
         iterations_per_episode=ITERATIONS_PER_EPISODE)
     
-    print("* Clean up MSF RPC client...")
+    print("*Clean up MSF RPC client...")
     utils.cleanup_msfrpc_client()
 
 

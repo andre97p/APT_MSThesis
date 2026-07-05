@@ -8,6 +8,10 @@
 # steering rules + bridge-netfilter settings that feed the queue, makes sure the
 # local ruleset is loadable, starts the service, and verifies capture is live.
 #
+# NOTE: the attacker (nmap + Metasploit) runs on THIS host, so attack packets are
+# host-originated and traverse OUTPUT/INPUT — NOT FORWARD. The steering rules below
+# cover OUTPUT/INPUT (host-as-attacker) *and* FORWARD (post-exploitation pivoting).
+#
 # Usage:
 #   ./snort_ids.sh          # or `up`  : configure + start (default)
 #   ./snort_ids.sh down     #            remove steering rules + stop Snort
@@ -62,44 +66,58 @@ discover_bridges() {
 # Steering-rule helpers (idempotent: check-then-add / delete-if-present)
 # ----------------------------------------------------------------------------
 rule_specs() {
-    # Emit the FORWARD rule bodies (without the -A/-D/-C verb) for the current range.
+    # Emit "<CHAIN> <body>" specs (without the -A/-D/-C verb) for the current range.
+    #
+    # The attacker (nmap + Metasploit/msfrpc) runs ON THIS HOST, so its packets are
+    # HOST-ORIGINATED: scans/exploits leave via OUTPUT, and responses / reverse
+    # shells come back via INPUT. They do NOT traverse FORWARD. These two chains are
+    # therefore the PRIMARY capture path — without them Snort never sees the attack.
+    local nfq="-j NFQUEUE --queue-num ${QUEUE_NUM} ${QUEUE_BYPASS}"
+    echo "OUTPUT -d ${RANGE_CIDR} ${nfq}"     # host -> range  (scans, exploit delivery)
+    echo "INPUT -s ${RANGE_CIDR} ${nfq}"      # range -> host  (responses, callbacks)
+
+    # Post-exploitation pivoting (VM -> VM) is routed or bridged, so also cover
+    # FORWARD (intra-subnet needs br_netfilter, enabled separately).
     local bridges; bridges="$(discover_bridges)"
     if [[ -n "${bridges// }" ]]; then
         for br in ${bridges}; do
-            echo "-i ${br} -j NFQUEUE --queue-num ${QUEUE_NUM} ${QUEUE_BYPASS}"
-            echo "-o ${br} -j NFQUEUE --queue-num ${QUEUE_NUM} ${QUEUE_BYPASS}"
+            echo "FORWARD -i ${br} ${nfq}"
+            echo "FORWARD -o ${br} ${nfq}"
         done
     else
-        warn "no bridges matching br${RANGE_ID}-* found; falling back to supernet ${RANGE_CIDR}"
-        echo "-s ${RANGE_CIDR} -j NFQUEUE --queue-num ${QUEUE_NUM} ${QUEUE_BYPASS}"
-        echo "-d ${RANGE_CIDR} -j NFQUEUE --queue-num ${QUEUE_NUM} ${QUEUE_BYPASS}"
+        warn "no bridges matching br${RANGE_ID}-* found; using supernet ${RANGE_CIDR} on FORWARD"
+        echo "FORWARD -s ${RANGE_CIDR} ${nfq}"
+        echo "FORWARD -d ${RANGE_CIDR} ${nfq}"
     fi
 }
 
 install_steering() {
-    local spec
+    local spec chain body
     while IFS= read -r spec; do
         [[ -z "${spec}" ]] && continue
+        chain="${spec%% *}"; body="${spec#* }"
         # shellcheck disable=SC2086
-        if iptables -C FORWARD ${spec} 2>/dev/null; then
-            log "steering rule already present: FORWARD ${spec}"
+        if iptables -C "${chain}" ${body} 2>/dev/null; then
+            log "steering rule already present: ${chain} ${body}"
         else
+            # Insert at the top so Snort inspects before any host firewall verdict.
             # shellcheck disable=SC2086
-            iptables -A FORWARD ${spec}
-            log "installed steering rule: FORWARD ${spec}"
+            iptables -I "${chain}" ${body}
+            log "installed steering rule: ${chain} ${body}"
         fi
     done < <(rule_specs)
 }
 
 remove_steering() {
-    local spec
+    local spec chain body
     while IFS= read -r spec; do
         [[ -z "${spec}" ]] && continue
+        chain="${spec%% *}"; body="${spec#* }"
         # shellcheck disable=SC2086
-        while iptables -C FORWARD ${spec} 2>/dev/null; do
+        while iptables -C "${chain}" ${body} 2>/dev/null; do
             # shellcheck disable=SC2086
-            iptables -D FORWARD ${spec}
-            log "removed steering rule: FORWARD ${spec}"
+            iptables -D "${chain}" ${body}
+            log "removed steering rule: ${chain} ${body}"
         done
     done < <(rule_specs)
 }
@@ -148,25 +166,42 @@ sanitize_rules() {
 # ----------------------------------------------------------------------------
 # Service control + verification
 # ----------------------------------------------------------------------------
-start_snort() {
-    if systemctl is-active --quiet "${SNORT_SERVICE}"; then
-        if systemctl reload "${SNORT_SERVICE}" 2>/dev/null; then
-            log "reloaded ${SNORT_SERVICE}"
-        else
-            warn "reload failed — restarting ${SNORT_SERVICE}"
-            systemctl restart "${SNORT_SERVICE}"
-        fi
-    else
-        systemctl start "${SNORT_SERVICE}"
-        log "started ${SNORT_SERVICE}"
-    fi
-    # Give it a moment to bind the queue / parse rules.
+_wait_active() {  # returns 0 once the service is active (waits up to ~5s)
     for _ in $(seq 1 10); do
-        systemctl is-active --quiet "${SNORT_SERVICE}" && break
+        systemctl is-active --quiet "${SNORT_SERVICE}" && return 0
         sleep 0.5
     done
-    systemctl is-active --quiet "${SNORT_SERVICE}" \
-        || die "${SNORT_SERVICE} failed to start — check: journalctl -u ${SNORT_SERVICE} -n40"
+    return 1
+}
+
+start_snort() {
+    # Clear any prior failed/rate-limited state ("start request repeated too
+    # quickly") so systemd will actually attempt to (re)start.
+    systemctl reset-failed "${SNORT_SERVICE}" 2>/dev/null || true
+
+    if systemctl is-active --quiet "${SNORT_SERVICE}"; then
+        if systemctl reload "${SNORT_SERVICE}" 2>/dev/null; then
+            log "reloaded ${SNORT_SERVICE}"; return
+        fi
+        warn "reload failed — restarting ${SNORT_SERVICE}"
+    fi
+    systemctl restart "${SNORT_SERVICE}" 2>/dev/null || true
+    if _wait_active; then log "started ${SNORT_SERVICE}"; return; fi
+
+    # A malformed local.rules (e.g. a bad rule appended by block_connections) is the
+    # usual cause of a start failure. Restore the clean baseline and retry once.
+    warn "${SNORT_SERVICE} failed to start — restoring clean ruleset baseline and retrying"
+    if [[ -f "${RULES_BASELINE}" ]]; then
+        cp -a "${RULES_BASELINE}" "${LOCAL_RULES}"
+        log "restored ${LOCAL_RULES} from ${RULES_BASELINE}"
+    fi
+    systemctl reset-failed "${SNORT_SERVICE}" 2>/dev/null || true
+    systemctl restart "${SNORT_SERVICE}" 2>/dev/null || true
+    if _wait_active; then
+        log "started ${SNORT_SERVICE} after baseline restore"
+    else
+        die "${SNORT_SERVICE} still failing — inspect: journalctl -u ${SNORT_SERVICE} -n40"
+    fi
 }
 
 verify() {
@@ -188,7 +223,13 @@ verify() {
         warn "recent FATAL in ${SNORT_SERVICE} journal — inspect: journalctl -u ${SNORT_SERVICE} -n40"; ok=0
     fi
 
-    log "steering rules in FORWARD:"; iptables -vnL FORWARD --line-numbers | grep -i NFQUEUE || warn "  (none matched NFQUEUE)"
+    log "active NFQUEUE steering rules (attacker runs on host -> OUTPUT/INPUT matter most):"
+    local found=0
+    for ch in OUTPUT INPUT FORWARD; do
+        while IFS= read -r r; do [[ -n "${r}" ]] && { printf '    %-8s %s\n' "${ch}" "${r}"; found=1; }; done \
+            < <(iptables -S "${ch}" 2>/dev/null | grep -i NFQUEUE)
+    done
+    [[ ${found} -eq 1 ]] || warn "  (no NFQUEUE rules found — attacker traffic will NOT reach Snort)"
     log "alerts land in: ${FAST_LOG}  (watch live with: sudo tail -f ${FAST_LOG})"
     [[ ${ok} -eq 1 ]] && log "capture path OK ✔" || warn "capture path has issues (see above)"
 }

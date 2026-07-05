@@ -8,14 +8,14 @@ class BlueActionExecutor:
         self.result: int
         self.action_reward = {
             "check_status": 3,
-            "block_connections": 6,
-            "isolate_host": 30,
+            "block_connections": 7,
+            "isolate_host": 20,
             "do_nothing": 0,
         }
         self.action_cost = {
-            "check_status": 1,
-            "block_connections": 3,
-            "isolate_host": 20,
+            "check_status": 2,
+            "block_connections": 5,
+            "isolate_host": 10,
             "do_nothing": 1,
         }
 

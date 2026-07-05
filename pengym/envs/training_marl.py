@@ -175,8 +175,7 @@ def config_MAPPO()->PPOConfig:
                 "centralized_critic": True,
                 "global_dim": GLOBAL_STATE_DIM
             }
-        }, training_batch_size=128,
-        minibatch_size=4
+        }
         )
     config.env_runners(num_env_runners=1)
     return config
@@ -228,8 +227,7 @@ def config_IPPO()->PPOConfig:
                 # it conditions on the agent's local observation, not the global state
                 "centralized_critic": False
             }
-        }, train_batch_size= 128,
-        minibatch_size=4
+        }
         )
     config.env_runners(num_env_runners=1)
 

@@ -1049,13 +1049,33 @@ class PenGymHostVector(HostVector):
 
         # Get the existed shell session from the target host
         session = utils.host_map[self.address][storyboard.SHELL]
+
+        if session is None:
+            print(f"* WARNING: No shell session for host {self.address} - process scan aborted")
+            return list(), time.time() - start
+
+        def _safe_read():
+            # Broad except on purpose: a dead session surfaces as KeyError('data'),
+            # but a severed connection can also raise socket/RPC errors here.
+            try:
+                return session.read()
+            except Exception as e:
+                print(f"* WARNING: Shell read failed for host {self.address} "
+                      f"(session likely dead): {e}")
+                return None
+
         session.write(PROCESS_SCAN_SHELL)
         time.sleep(1)
-        response = session.read()
+        response = _safe_read()
+        if response is None:
+            return list(), time.time() - start
 
         while (flag_process not in response):
             time.sleep(1)
-            response = session.read() + response
+            chunk = _safe_read()
+            if chunk is None:
+                break
+            response = chunk + response
 
             # Stop condition
             if (time.time() - start > 30):
