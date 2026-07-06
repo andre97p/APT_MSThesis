@@ -21,8 +21,8 @@ storyboard = Storyboard()
 
 
 # Other constants
-N_EPISODES=10
-ITERATIONS_PER_EPISODE = 300 # Number of RLlib training iterations composing each episode
+N_EPISODES= 5
+ITERATIONS_PER_EPISODE = 100 # Number of RLlib training iterations composing each episode
 RENDER_OBS_STATE = False
 
 #############################################################################
@@ -38,8 +38,7 @@ def create_pengym_environment(scenario_name):
 
     # Initialize seed for numpy (used to determine exploit success/failure) and
     # for the environment action space (used to determine order of random actions)
-    seed = 1 #NORMAL: No e_ssh failure during pentesting path
-    #seed = 300 # INCOMPLETE: Cause e_ssh failure during pentesting path
+    seed = 1
     np.random.seed(seed)
     env.action_space.seed(1)
 

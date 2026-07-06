@@ -85,7 +85,7 @@ class PenGymMultiEnv(MultiAgentEnv):
         self._attacker_obs = None
         self.steps = 0
 
-        self.max_episode_steps = int(env_config.get("max_episode_steps", 300))
+        self.max_episode_steps = int(env_config.get("max_episode_steps", 100)) #100 is specific value for the tiny scenario
 
     def _get_defender_obs(self) -> dict:
         """

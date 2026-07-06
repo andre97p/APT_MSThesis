@@ -55,27 +55,24 @@ class ActorCriticArchitecture(TorchModelV2, nn.Module):
 
         # 1. Decentralized Actor Network (\pi_{\theta})
         self.actor = nn.Sequential(
-            nn.Linear(local_dim, 256),
-            nn.LayerNorm(256),
+            nn.Linear(local_dim, 64),
+            nn.LayerNorm(64),
             nn.LeakyReLU(0.1),
-            nn.Linear(256, 256),
-            nn.LayerNorm(256),
+            nn.Linear(64, 64),
+            nn.LayerNorm(64),
             nn.LeakyReLU(0.1),
-            nn.Linear(256, num_outputs) # Outputs logits for the categorical action distribution
+            nn.Linear(64, num_outputs) # Outputs logits for the categorical action distribution
         )
 
         # 2. Critic Network (V_{\phi}): centralized for MAPPO, decentralized for IPPO
         self.critic = nn.Sequential(
-            nn.Linear(critic_input_dim, 512),
-            nn.LayerNorm(512),
+            nn.Linear(critic_input_dim, 128),
+            nn.LayerNorm(128),
             nn.LeakyReLU(0.1),
-            nn.Linear(512, 512),
-            nn.LayerNorm(512),
+            nn.Linear(128, 128),
+            nn.LayerNorm(128),
             nn.LeakyReLU(0.1),
-            nn.Linear(512,256),
-            nn.LayerNorm(256),
-            nn.LeakyReLU(0.1),
-            nn.Linear(256, 1) #Outputs standard scalar baseline estimate
+            nn.Linear(128, 1) #Outputs standard scalar baseline estimate
         )
         self._value_out = None
 
@@ -141,6 +138,8 @@ def config_MAPPO()->PPOConfig:
         "scenario_name": "tiny",
         "enable_nasim": False,
         "enable_pengym": True,
+        "max_episode_steps": 100, #fixed to 100 only for Tiny scenario 
+
     })
     config.framework("torch") # Use PyTorch
     config.api_stack(
@@ -165,19 +164,25 @@ def config_MAPPO()->PPOConfig:
     config.training(
         #hyper parameters should be tuned
         lr=3e-4,
-        clip_param=0.2,
-        gamma=0.90,
+        clip_param=0.2,        # PPO policy-ratio trust region (keep ~0.1-0.3)
+        vf_clip_param=200.0,   # value targets reach ~195 in tiny; default 10 would cripple the critic
+        gamma=0.99,
         lambda_=0.95,
         use_gae=True,
+        entropy_coeff=0.015,
         model= {
             "custom_model": "actor_critic_model",
             "custom_model_config": {
                 "centralized_critic": True,
                 "global_dim": GLOBAL_STATE_DIM
             }
-        }
+        },  train_batch_size=64,
+        minibatch_size=16,
+        num_sgd_iter=4
         )
-    config.env_runners(num_env_runners=1)
+
+    config.env_runners(num_env_runners=0, batch_mode="complete_episodes",
+                       sample_timeout_s=3600.0)
     return config
     
 
@@ -196,6 +201,7 @@ def config_IPPO()->PPOConfig:
         "scenario_name": "tiny",
         "enable_nasim": False,
         "enable_pengym": True,
+        "max_episode_steps": 100, #fixed to 100 only for Tiny scenario 
     })
     config.framework("torch") # Use PyTorch
     config.multi_agent(
@@ -213,13 +219,15 @@ def config_IPPO()->PPOConfig:
         policy_mapping_fn = lambda agent_id, episode, **kwargs:
             "attacker_policy" if agent_id == "attacker" else "defender_policy")
         # Map the agent string ID from the environment to the specific policy name
-                        
+
     config.training(
         lr=3e-4,
-        clip_param=0.15,
-        gamma=0.90,
+        clip_param=0.2,        # PPO policy-ratio trust region (keep ~0.1-0.3)
+        vf_clip_param=200.0,   # value targets reach ~195 in tiny; default 10 would cripple the critic
+        gamma=0.99,
         lambda_=0.95,
         use_gae=True,
+        entropy_coeff=0.015,
         model= {
             "custom_model": "actor_critic_model",
             "custom_model_config": {
@@ -227,9 +235,13 @@ def config_IPPO()->PPOConfig:
                 # it conditions on the agent's local observation, not the global state
                 "centralized_critic": False
             }
-        }
+        }, train_batch_size=64,
+        minibatch_size=16,
+        num_sgd_iter=4
         )
-    config.env_runners(num_env_runners=1)
+
+    config.env_runners(num_env_runners=0, batch_mode="complete_episodes",
+                       sample_timeout_s=3600.0)
 
     return config
     
@@ -253,8 +265,7 @@ def _run_training_iteration(algo, iteration, total_iterations, history):
     # completed within this iteration's sample batch. It can be legitimately
     # missing when a RolloutWorker restarts mid-episode (e.g. after the
     # SYSTEM_ERROR crashes seen with the live cyber-range backend) or when no
-    # episode finished yet. Skip logging that iteration instead of crashing
-    # the whole run on a single flaky rollout.
+    # episode finished yet.
     if att_rew is None or def_rew is None or ep_len_mean is None:
         print(f"{progress} | "
               f"No completed episodes reported for one or more policies "
@@ -272,7 +283,6 @@ def _run_training_iteration(algo, iteration, total_iterations, history):
           f"Attacker Return: {att_rew} | "
           f"Defender Return: {def_rew} | "
           f"Avg Steps: {ep_len}")
-
 
 def execute_training(algo_type, num_episodes, iterations_per_episode):
     """
@@ -306,9 +316,9 @@ def execute_training(algo_type, num_episodes, iterations_per_episode):
         _run_training_iteration(algo, iteration, total_iterations, history)
 
         # Periodic checkpointing (disabled): save every `iterations_per_episode` iters.
-        # if iteration % iterations_per_episode == 0:
-        #     checkpoint_dir = algo.save(checkpoint_dir=f"./checkpoints/{algo_type}_iter{iteration}")
-        #     print(f"[*] Checkpoint saved at: {checkpoint_dir}")
+        #if iteration % 100 == 0:
+            #checkpoint_dir = algo.save(checkpoint_dir=f"./checkpoints/{algo_type}_iter{iteration}")
+            #print(f"[*] Checkpoint saved at: {checkpoint_dir}")
 
     plot_rewards(history, algo_type=algo_type)
     plot_steps(history, algo_type=algo_type)
